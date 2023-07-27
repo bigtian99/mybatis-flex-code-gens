@@ -45,7 +45,6 @@
     <depends>com.intellij.modules.lang</depends>
     <depends>com.intellij.modules.java</depends>
     <depends>org.jetbrains.kotlin</depends>
-    <depends>com.intellij.database</depends>
 
     <!-- Extension points defined by the plugin.
          Read more: https://plugins.jetbrains.com/docs/intellij/plugin-extension-points.html -->
@@ -65,7 +64,7 @@
         <action id="MyBatisFlex_TableAction" class="club.bigtian.mf.plugin.action.flex.TableAction"
                 icon="/icons/icon.png"
                 text="mybatis flex code generate" description="用于选择database中的table从而进行代码生成">
-            <add-to-group group-id="DatabaseViewPopupMenu" anchor="first"/>
+            <add-to-group group-id="GenerateGroup" anchor="first"/>
         </action>
 
         <action id="com.starxg.mybatislog.action.MyBatisLogAction"

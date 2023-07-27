@@ -1,9 +1,6 @@
 package club.bigtian.mf.plugin.core;
 
-import club.bigtian.mf.plugin.core.util.CompilerManagerUtil;
-import club.bigtian.mf.plugin.core.util.KtFileUtil;
-import club.bigtian.mf.plugin.core.util.PsiJavaFileUtil;
-import club.bigtian.mf.plugin.core.util.VirtualFileUtils;
+import club.bigtian.mf.plugin.core.util.*;
 import cn.hutool.core.util.ObjectUtil;
 import cn.hutool.core.util.StrUtil;
 import com.intellij.openapi.Disposable;
@@ -52,6 +49,8 @@ public class MybatisFlexDocumentChangeHandler implements DocumentListener, Edito
                     executeCompile(editor);
                 }
             });
+            Project project = editor.getProject();
+            ProjectUtils.setCurrentProject(project);
         }
     }
 
@@ -80,6 +79,8 @@ public class MybatisFlexDocumentChangeHandler implements DocumentListener, Edito
             document.putUserData(LISTENER, true);
             document.addDocumentListener(this);
         }
+        Project project = editor.getProject();
+        ProjectUtils.setCurrentProject(project);
     }
 
     private void executeCompile(Editor editor) {

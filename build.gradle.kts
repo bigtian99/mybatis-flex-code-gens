@@ -21,8 +21,8 @@ repositories {
 intellij {
     version.set("2022.2.5")
 //    version.set("2020.3.3")
-    type.set("IU") // Target IDE Platform
-    plugins.set(listOf("com.intellij.java", "org.jetbrains.kotlin", "IntelliLang", "com.intellij.database"))
+    type.set("IC") // Target IDE Platform
+    plugins.set(listOf("com.intellij.java", "org.jetbrains.kotlin", "IntelliLang"))
 }
 
 dependencies {

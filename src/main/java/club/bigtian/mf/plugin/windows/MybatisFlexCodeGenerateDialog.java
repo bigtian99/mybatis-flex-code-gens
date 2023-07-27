@@ -31,7 +31,6 @@ import java.awt.*;
 import java.awt.event.*;
 import java.util.List;
 import java.util.*;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 
 public class MybatisFlexCodeGenerateDialog extends JDialog {
@@ -171,9 +170,7 @@ public class MybatisFlexCodeGenerateDialog extends JDialog {
                 selectAllChexBox.setSelected(true);
             }
         });
-        tableInfoMap = TableUtils.getAllTables(actionEvent)
-                .stream()
-                .collect(Collectors.toMap(TableInfo::getName, Function.identity()));
+        tableInfoMap = new HashMap<>();
 
         DefaultListModel model = new DefaultListModel();
         // tableNameSet按照字母降序
@@ -217,7 +214,7 @@ public class MybatisFlexCodeGenerateDialog extends JDialog {
                 model.addAll(search);
             }
         });
-        setSelectTalbe(actionEvent);
+//        setSelectTalbe(actionEvent);
 
         strictComBox.addChangeListener(e -> generateBtn.setEnabled(!strictComBox.isSelected()));
 
@@ -259,13 +256,13 @@ public class MybatisFlexCodeGenerateDialog extends JDialog {
      *
      * @param event 事件
      */
-    public void setSelectTalbe(AnActionEvent event) {
-        List<String> selectedTableName = TableUtils.getSelectedTableName(event);
-        for (String tableName : selectedTableName) {
-            int idx = tableNameList.indexOf(tableName);
-            tableList.addSelectionInterval(idx, idx);
-        }
-    }
+//    public void setSelectTalbe(AnActionEvent event) {
+//        List<String> selectedTableName = new ArrayList<>();
+//        for (String tableName : selectedTableName) {
+//            int idx = tableNameList.indexOf(tableName);
+//            tableList.addSelectionInterval(idx, idx);
+//        }
+//    }
 
     public void initSinceComBox() {
         Set<String> list = MybatisFlexPluginConfigData.getSinceMap().keySet();
