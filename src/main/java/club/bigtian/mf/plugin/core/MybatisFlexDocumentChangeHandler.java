@@ -16,6 +16,7 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.psi.PsiDocumentManager;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiJavaFile;
 import com.intellij.psi.PsiManager;
@@ -97,6 +98,9 @@ public class MybatisFlexDocumentChangeHandler implements DocumentListener, Edito
             return;
         }
         document.putUserData(CHANGE, false);
+
+        PsiDocumentManager.getInstance(project).commitDocument(document);
+
         // 执行任务的逻辑
         Application application = ApplicationManager.getApplication();
         application.invokeLater(() -> {
@@ -146,8 +150,13 @@ public class MybatisFlexDocumentChangeHandler implements DocumentListener, Edito
     }
 
     private void compile(@NotNull Editor editor) {
-        VirtualFile currentFile = VirtualFileUtils.getVirtualFile(editor.getDocument());
-        CompilerManagerUtil.compile(new VirtualFile[]{currentFile}, null);
+//        VirtualFile currentFile = VirtualFileUtils.getVirtualFile(editor.getDocument());
+//        CompilerManagerUtil.compile(new VirtualFile[]{currentFile}, null);
+        try {
+            CompilerManagerUtil.make();
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 
 

@@ -1,6 +1,10 @@
 package club.bigtian.mf.plugin.action.flex;
 
+import club.bigtian.mf.plugin.core.Template;
+import club.bigtian.mf.plugin.core.config.MybatisFlexConfig;
+import club.bigtian.mf.plugin.windows.DatabaseInfoDialog;
 import club.bigtian.mf.plugin.windows.MybatisFlexCodeGenerateDialog;
+import cn.hutool.core.util.StrUtil;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 
@@ -15,8 +19,17 @@ public class TableAction extends AnAction {
 
     @Override
     public void actionPerformed(AnActionEvent e) {
+        MybatisFlexConfig config = Template.getMybatisFlexConfig();
+        if (StrUtil.isEmpty(config.getUsername()) || StrUtil.isEmpty(config.getPassword()) || StrUtil.isEmpty(config.getUrl())) {
+            DatabaseInfoDialog dialog = new DatabaseInfoDialog(e);
+            dialog.setVisible(true);
+        }
+        config = Template.getMybatisFlexConfig();
+        if (StrUtil.isEmpty(config.getUsername()) || StrUtil.isEmpty(config.getPassword()) || StrUtil.isEmpty(config.getUrl())) {
+            return;
+        }
         MybatisFlexCodeGenerateDialog generateWin = new MybatisFlexCodeGenerateDialog(e);
-        generateWin.show();
+        generateWin.setVisible(true);
     }
 
 //

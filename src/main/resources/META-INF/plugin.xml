@@ -74,6 +74,7 @@
 
                 text="mybatis flex code generate" description="用于选择database中的table从而进行代码生成">
             <add-to-group group-id="GenerateGroup" anchor="first"/>
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
         </action>
 
         <action id="com.starxg.mybatislog.action.MyBatisLogAction"
