@@ -37,6 +37,13 @@ public class RenderMybatisFlexTemplate {
     public static void assembleData(List<TableInfo> selectedTableInfo, MybatisFlexConfig config, @Nullable Project project) {
 
         VelocityEngine velocityEngine = new VelocityEngine();
+        //修复因velocity.log拒绝访问，导致Velocity初始化失败
+//        高版本已经把这个方法废弃了，所以这里注释掉；优先支持高版本
+//        try {
+//            velocityEngine.setProperty(RuntimeConstants.RUNTIME_LOG_LOGSYSTEM, new NullLogChute());
+//        } catch (Exception e) {
+//            LOG.error("Velocity初始化失败；如果不影响生成，请忽略");
+//        }
         VelocityContext context = new VelocityContext();
         HashMap<PsiDirectory, List<PsiElement>> templateMap = new HashMap<>();
         Map<String, String> templates = new ConcurrentHashMap<>(config.getTemplates());

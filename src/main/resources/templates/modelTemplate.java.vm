@@ -1,6 +1,6 @@
 package $config.modelPackage;
 
-#if($config.data)
+#if($config.data||$config.activeRecord)
 import lombok.Data;
 #end
 #if($config.allArgsConstructor)
@@ -9,8 +9,14 @@ import lombok.AllArgsConstructor;
 #if($config.noArgsConstructor)
 import lombok.NoArgsConstructor;
 #end
+#if($config.requiredArgsConstructor)
+import lombok.RequiredArgsConstructor;
+#end
 #if($config.builder)
 import lombok.Builder;
+#end
+#if($config.accessors)
+import lombok.experimental.Accessors;
 #end
 #if($config.swagger)
 import io.swagger.annotations.ApiModel;
@@ -18,6 +24,9 @@ import io.swagger.annotations.ApiModelProperty;
 #end
 #if($config.swagger3)
 import io.swagger.v3.oas.annotations.media.Schema;
+#end
+#if($config.activeRecord)
+import com.mybatisflex.core.activerecord.Model;
 #end
 import com.mybatisflex.annotation.Column;
 import com.mybatisflex.annotation.Id;
@@ -33,8 +42,14 @@ import $classImport;
  * @author $author
  * @since $since
  */
-#if($config.data)
-@Data
+#if($config.accessors)
+@Accessors(chain = true)
+#end
+#if($config.requiredArgsConstructor)
+@RequiredArgsConstructor
+#end
+#if($config.data||$config.activeRecord)
+@Data#if($config.activeRecord)(staticConstructor = "create") #end
 #end
 #if($config.builder)
 @Builder
@@ -52,7 +67,7 @@ import $classImport;
 @Schema(name = "$table.comment")
 #end
 @Table("$table.name")
-public class ${modelName} {
+public class ${modelName} #if($config.activeRecord) extends Model<${modelName}>  #end {
 
     #foreach($column in $table.columnList)
     #if($column.comment.length()>0)
@@ -75,7 +90,7 @@ public class ${modelName} {
 
 #end
 
-#if($config.data==false)
+#if($config.data==false&& $config.activeRecord==false)
     #foreach($column in $table.columnList)
     public  $column.fieldType  get${column.methodName}() {
         return ${column.fieldName};

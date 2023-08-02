@@ -31,7 +31,7 @@ import java.util.Set;
 /**
  * @author bigtian
  */
-public class MybatisFlexDocumentChangeHandler implements DocumentListener, EditorFactoryListener, Disposable {
+public class MybatisFlexDocumentChangeHandler implements DocumentListener, EditorFactoryListener, Disposable{
     private static final Logger LOG = Logger.getInstance(MybatisFlexDocumentChangeHandler.class);
     private static final Key<Boolean> CHANGE = Key.create("change");
     private static final Key<Boolean> LISTENER = Key.create("listener");
@@ -41,7 +41,10 @@ public class MybatisFlexDocumentChangeHandler implements DocumentListener, Edito
         // 所有的文档监听
         EditorFactory.getInstance().getEventMulticaster().addDocumentListener(this, this);
         Document document;
+
         for (Editor editor : EditorFactory.getInstance().getAllEditors()) {
+            ProjectUtils.setCurrentProject(editor.getProject());
+
             document = editor.getDocument();
             document.putUserData(LISTENER, true);
             editor.addEditorMouseListener(new EditorMouseListener() {
@@ -80,8 +83,7 @@ public class MybatisFlexDocumentChangeHandler implements DocumentListener, Edito
             document.putUserData(LISTENER, true);
             document.addDocumentListener(this);
         }
-        Project project = editor.getProject();
-        ProjectUtils.setCurrentProject(project);
+        ProjectUtils.setCurrentProject(editor.getProject());
     }
 
     private void executeCompile(Editor editor) {

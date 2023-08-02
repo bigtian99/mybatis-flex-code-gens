@@ -31,9 +31,12 @@ import java.util.stream.Collectors;
 
 /**
  * tabDef补全提示
- * Author: BigTian
+ *
+ * @author BigTian
  */
 public class MybatisFlexCompletionContributor extends CompletionContributor {
+
+
     PsiElementFactory elementFactory;
     JavaPsiFacade psiFacade;
     PsiManager psiManager;
@@ -41,25 +44,29 @@ public class MybatisFlexCompletionContributor extends CompletionContributor {
 
     @Override
     public void fillCompletionVariants(@NotNull CompletionParameters parameters, @NotNull CompletionResultSet result) {
-        Project project = parameters.getPosition().getProject();
-        if (ObjectUtil.isNull(elementFactory)) {
-            elementFactory = JavaPsiFacade.getElementFactory(project);
-            psiFacade = JavaPsiFacade.getInstance(project);
-            psiManager = PsiManager.getInstance(project);
+        try {
+            Project project = parameters.getPosition().getProject();
+            if (ObjectUtil.isNull(elementFactory)) {
+                elementFactory = JavaPsiFacade.getElementFactory(project);
+                psiFacade = JavaPsiFacade.getInstance(project);
+                psiManager = PsiManager.getInstance(project);
+            }
+            Map<String, String> tableDefMap = new ConcurrentHashMap<>(new TreeMap<>());
+            // 获取当前编辑的文件
+            Document document = parameters.getEditor().getDocument();
+            VirtualFile currentFile = fileDocumentManager.getFile(document);
+            assert currentFile != null;
+            getDependenciesTableDef(currentFile, project, tableDefMap);
+            // 移除重复的元素
+            removeRepetitionElement(currentFile, tableDefMap, result);
+            if (CollUtil.isEmpty(tableDefMap)) {
+                return;
+            }
+            // 添加代码提示
+            addCodeTip(result, tableDefMap, currentFile, project, document);
+        } catch (PsiInvalidElementAccessException e) {
+
         }
-        Map<String, String> tableDefMap = new ConcurrentHashMap<>(new TreeMap<>());
-        // 获取当前编辑的文件
-        Document document = parameters.getEditor().getDocument();
-        VirtualFile currentFile = fileDocumentManager.getFile(document);
-        assert currentFile != null;
-        getDependenciesTableDef(currentFile, project, tableDefMap);
-        // 移除重复的元素
-        removeRepetitionElement(currentFile, tableDefMap, result);
-        if (CollUtil.isEmpty(tableDefMap)) {
-            return;
-        }
-        // 添加代码提示
-        addCodeTip(result, tableDefMap, currentFile, project, document);
     }
 
 
@@ -167,7 +174,7 @@ public class MybatisFlexCompletionContributor extends CompletionContributor {
             return;
         }
         ktFile.getImportList().add(importStatementOnDemand);
-        //为什么要这样写，因为kotlin 不支持静态导入，要么就是.*导入，但是.*又会导致上面代码提示重复，所以只能这样写
+        // 为什么要这样写，因为kotlin 不支持静态导入，要么就是.*导入，但是.*又会导致上面代码提示重复，所以只能这样写
         String text = ktFile.getText().replace("import " + importText + ".*", "\nimport " + importText + "." + finalImport);
         document.setText(text);
     }
@@ -195,13 +202,17 @@ public class MybatisFlexCompletionContributor extends CompletionContributor {
 
     private Set<String> getFileImport(VirtualFile currentFile) {
         Set<String> importSet = new HashSet<>();
-        PsiFile file = psiManager.findFile(currentFile);
-        if (file instanceof PsiJavaFile) {
-            PsiJavaFile javaFile = (PsiJavaFile) file;
-            importSet = PsiJavaFileUtil.getImportSet(javaFile);
-        } else if (file instanceof KtFile) {
-            KtFile ktFile = (KtFile) file;
-            importSet = KtFileUtil.getImportSet(ktFile);
+        try {
+            PsiFile file = psiManager.findFile(currentFile);
+            if (file instanceof PsiJavaFile) {
+                PsiJavaFile javaFile = (PsiJavaFile) file;
+                importSet = PsiJavaFileUtil.getImportSet(javaFile);
+            } else if (file instanceof KtFile) {
+                KtFile ktFile = (KtFile) file;
+                importSet = KtFileUtil.getImportSet(ktFile);
+            }
+        } catch (Exception e) {
+
         }
         return importSet.stream()
                 .map(el -> {

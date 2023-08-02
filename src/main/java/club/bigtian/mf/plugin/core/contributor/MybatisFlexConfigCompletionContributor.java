@@ -10,12 +10,16 @@ import com.intellij.codeInsight.completion.CompletionParameters;
 import com.intellij.codeInsight.completion.CompletionResultSet;
 import com.intellij.codeInsight.lookup.LookupElement;
 import com.intellij.codeInsight.lookup.LookupElementBuilder;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Editor;
+import com.intellij.openapi.editor.LogicalPosition;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.JavaPsiFacade;
 import com.intellij.psi.PsiElementFactory;
+import com.intellij.psi.PsiInvalidElementAccessException;
 import com.intellij.psi.PsiManager;
 import org.jetbrains.annotations.NotNull;
 
@@ -30,6 +34,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * Author: BigTian
  */
 public class MybatisFlexConfigCompletionContributor extends CompletionContributor {
+    private static final Logger LOG = Logger.getInstance(MybatisFlexConfigCompletionContributor.class);
     PsiElementFactory elementFactory;
     JavaPsiFacade psiFacade;
     PsiManager psiManager;
@@ -56,14 +61,51 @@ public class MybatisFlexConfigCompletionContributor extends CompletionContributo
 
     @Override
     public void fillCompletionVariants(@NotNull CompletionParameters parameters, @NotNull CompletionResultSet result) {
-        Editor editor = parameters.getEditor();
-        Document document = editor.getDocument();
-        VirtualFile file = VirtualFileUtils.getVirtualFile(document);
-        boolean flag = file.getName().equals("mybatis-flex.config");
-        // 如果不是 mybatis-flex.config 文件，直接返回
-        if (!flag) {
-            return;
+        try {
+            Editor editor = parameters.getEditor();
+            Document document = editor.getDocument();
+            VirtualFile file = VirtualFileUtils.getVirtualFile(document);
+            boolean flag = file.getName().equals("mybatis-flex.config");
+            // 如果不是 mybatis-flex.config 文件，直接返回
+            if (!flag) {
+                return;
+            }
+            Project project = parameters.getPosition().getProject();
+            if (ObjectUtil.isNull(elementFactory)) {
+                elementFactory = JavaPsiFacade.getElementFactory(project);
+                psiFacade = JavaPsiFacade.getInstance(project);
+                psiManager = PsiManager.getInstance(project);
+            }
+
+            // 获取已经存在的配置,存在的配置不再提示
+            List<String> existConfigList = getExistConfig(document);
+            // 获取当前光标位置
+            LogicalPosition logicalPosition = editor.getCaretModel().getLogicalPosition();
+            // 获取当前光标位置的文本信息
+            int line = logicalPosition.line;
+            String text = editor.getDocument().getText(new TextRange(line, document.getLineEndOffset(line)));
+            // 如果包含 = ，则提示 value
+            if (text.contains("=")) {
+                text = text.substring(0, text.lastIndexOf("=") + 1);
+                MybatisFlexConfgInfo confgInfo = CONFIG_MAP.get(text);
+                if (ObjectUtil.isNotNull(confgInfo)) {
+                    addCodeTip(result, confgInfo.getValue());
+                    return;
+                }
+            }
+            // 添加代码提示
+            addCodeTip(result, existConfigList, text);
+        } catch (PsiInvalidElementAccessException e) {
         }
+    }
+
+    /**
+     * 获取已经存在的配置
+     *
+     * @param document
+     * @return
+     */
+    private List<String> getExistConfig(Document document) {
         List<String> existConfigList = new ArrayList<>();
         String text = document.getText();
         for (String configKey : CONFIG_MAP.keySet()) {
@@ -71,27 +113,37 @@ public class MybatisFlexConfigCompletionContributor extends CompletionContributo
                 existConfigList.add(configKey);
             }
         }
-
-
-        Project project = parameters.getPosition().getProject();
-        if (ObjectUtil.isNull(elementFactory)) {
-            elementFactory = JavaPsiFacade.getElementFactory(project);
-            psiFacade = JavaPsiFacade.getInstance(project);
-            psiManager = PsiManager.getInstance(project);
-        }
-
-        // 添加代码提示
-        addCodeTip(result, existConfigList);
+        return existConfigList;
     }
 
+    /**
+     * 添加代码提示(值)
+     *
+     * @param result
+     * @param list
+     */
+    private void addCodeTip(@NotNull CompletionResultSet result, List<String> list) {
+        if (list.size() == 1) {
+            return;
+        }
+        for (String key : list) {
+            // 添加补全提示
+            LookupElement lookupElement = LookupElementBuilder.create(key)
+                    .withIcon(Icons.FLEX);
+            result.addElement(lookupElement);
+        }
+
+
+    }
 
     /**
      * 添加代码提示
      *
      * @param result          结果
      * @param existConfigList
+     * @param text
      */
-    private void addCodeTip(@NotNull CompletionResultSet result, List<String> existConfigList) {
+    private void addCodeTip(@NotNull CompletionResultSet result, List<String> existConfigList, String text) {
         // 获取忽略大小写的结果集
         CompletionResultSet completionResultSet = result.caseInsensitive();
         String prefix = completionResultSet.getPrefixMatcher().getPrefix();
@@ -110,7 +162,10 @@ public class MybatisFlexConfigCompletionContributor extends CompletionContributo
                         .withTypeText(confgInfo.getDescription())
                         .withInsertHandler((context, item) -> {
                             int tailOffset = context.getTailOffset();
-                            context.getDocument().insertString(tailOffset, " # " + confgInfo.getDescription());
+                            // 如果不包含 #，则添加注释
+                            if (!text.contains("#")) {
+                                context.getDocument().insertString(tailOffset, " # " + confgInfo.getDescription());
+                            }
                             if (confgInfo.getValue().size() > 1) {
                                 context.getEditor().getCaretModel().moveToOffset(tailOffset + key.length() + 3);
                             }
