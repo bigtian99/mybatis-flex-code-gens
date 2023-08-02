@@ -82,7 +82,6 @@
 
     <actions>
         <action id="MyBatisFlex_TableAction" class="club.bigtian.mf.plugin.action.flex.TableAction"
-                icon="/icons/icon.png"
 
                 icon="/icons/flex.svg"
 
