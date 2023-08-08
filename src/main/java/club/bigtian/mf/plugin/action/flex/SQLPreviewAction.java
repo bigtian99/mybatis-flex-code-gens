@@ -133,7 +133,7 @@ public class SQLPreviewAction extends AnAction {
 
         String val = null;
         String print = StrUtil.format(SYSTEM_OUT_PRINTLN_TO_SQL, text);
-        boolean flag = StrUtil.containsAny(text, "queryChain()", "query()");
+        boolean flag = StrUtil.containsAny(text, "queryChain()", "query()", "updateChain()");
         AtomicReference<String> variableReference = new AtomicReference<>();
         String ofValue = null;
         if (flag) {

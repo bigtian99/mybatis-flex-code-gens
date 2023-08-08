@@ -78,7 +78,7 @@ public class MybatisFlexConfigAnnotator implements Annotator {
                 return;
             }
 
-            if (StrUtil.containsAny(text, "QueryWrapper", "UpdateChain", "QueryChain", "queryChain()", "query()")
+            if (StrUtil.containsAny(text, "QueryWrapper", "UpdateChain", "QueryChain", "queryChain()", "updateChain()", "query()")
                     && text.endsWith(";")) {
                 if (text.contains("=")) {
                     text = StrUtil.subAfter(text, "=", false).trim();
@@ -93,7 +93,7 @@ public class MybatisFlexConfigAnnotator implements Annotator {
                     text = getBracketContent(text);
                 }
                 String key = StrUtil.subBefore(text, "(", false);
-                if (StrUtil.containsAny(text, "query()", "queryChain()")) {
+                if (StrUtil.containsAny(text, "query()", "queryChain()", "updateChain()")) {
                     key = "QueryWrapper.create";
                 }
                 Function<String, String> function = functionMap.get(key);
@@ -197,7 +197,7 @@ public class MybatisFlexConfigAnnotator implements Annotator {
      */
     public boolean checkInBracket(String text) {
         String matchText = StrUtil.sub(text, text.indexOf("(") + 1, text.lastIndexOf(")"));
-        if (StrUtil.containsAny(matchText, "QueryWrapper", "UpdateChain", "QueryChain", "queryChain()", "query()")) {
+        if (StrUtil.containsAny(matchText, "QueryWrapper", "UpdateChain", "QueryChain", "queryChain()", "query()", "updateChain()")) {
             return true;
         }
         return false;
