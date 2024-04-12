@@ -378,5 +378,9 @@ public class PackageChooserDialogCustom extends PackageChooser {
         public void enableInModalConext() {
             this.setEnabledInModalContext(true);
         }
+        @Override
+        public @NotNull ActionUpdateThread getActionUpdateThread() {
+            return ActionUpdateThread.BGT;
+        }
     }
 }
