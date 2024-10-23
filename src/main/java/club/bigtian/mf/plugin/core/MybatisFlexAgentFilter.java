@@ -15,7 +15,6 @@ public class MybatisFlexAgentFilter implements Filter {
     private String sql = null;
 
     public MybatisFlexAgentFilter() {
-
     }
 
     @NotNull
