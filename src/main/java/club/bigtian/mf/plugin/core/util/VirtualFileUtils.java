@@ -296,6 +296,7 @@ public class VirtualFileUtils {
             resourceFiles.addAll(objects);
         }
         Map<String, XmlFile> namespace = resourceFiles.stream()
+                .filter(el->ObjectUtil.isNotNull(el.getRootTag()))
                 .collect(Collectors.toMap(el -> el.getRootTag().getAttributeValue("namespace"), el -> el, (k1, k2) -> k1));
         return namespace;
     }
