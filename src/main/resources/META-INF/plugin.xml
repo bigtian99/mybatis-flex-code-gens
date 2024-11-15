@@ -39,9 +39,9 @@
     ]]></description>
 
     <change-notes><![CDATA[
-    <h3>1.6.6-RELEASE</h3>
+    <h3>1.6.7-RELEASE</h3>
     <ul>
-    <li>【新增】增加自定义模板变量配置(Groovy)</li>
+    <li>【优】支持2024.3版本</li>
     </ul>
     ]]></change-notes>
     <!-- Product and plugin compatibility requirements.

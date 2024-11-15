@@ -15,7 +15,6 @@ import com.intellij.psi.*;
 import com.intellij.psi.xml.XmlFile;
 import com.intellij.psi.xml.XmlTag;
 import com.intellij.testFramework.LightVirtualFile;
-import io.github.kings1990.plugin.fastrequest.cofig.ll11l11II1ll1IlIllIl;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.Arrays;

@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "com.mybatisflex.plugin"
-version = "1.6.6-RELEASE"
+version = "1.6.7-RELEASE"
 
 repositories {
     maven {
@@ -50,7 +50,6 @@ tasks {
             "-javaagent:/Users/daijunxiong/app/jetbra/ja-netfilter.jar=jetbrains",
             "--add-opens=java.base/jdk.internal.org.objectweb.asm=ALL-UNNAMED",
             "--add-opens=java.base/jdk.internal.org.objectweb.asm.tree=ALL-UNNAMED"
-
         )
 
     }
@@ -66,7 +65,7 @@ tasks {
 
     patchPluginXml {
         sinceBuild.set("232.*")
-        untilBuild.set("242.*")
+        untilBuild.set("243.*")
     }
 
     signPlugin {
