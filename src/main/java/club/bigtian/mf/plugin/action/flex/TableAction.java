@@ -1,6 +1,7 @@
 package club.bigtian.mf.plugin.action.flex;
 
 import club.bigtian.mf.plugin.core.util.ProjectUtils;
+import club.bigtian.mf.plugin.core.util.TableUtils;
 import club.bigtian.mf.plugin.windows.MybatisFlexCodeGenerateDialog;
 import com.intellij.database.model.DasTable;
 import com.intellij.openapi.actionSystem.ActionUpdateThread;
@@ -38,9 +39,8 @@ public class TableAction extends AnAction {
     @Override
     public void update(AnActionEvent e) {
         ProjectUtils.setCurrentProject(e.getProject());
-        Object selectedElement = e.getData(CommonDataKeys.PSI_ELEMENT);
-        boolean isSelectedTable = selectedElement instanceof DasTable;
-        // e.getPresentation().setVisible(true);
+        DasTable dasTable = TableUtils.getSelectedSingleTable(e);
+        boolean isSelectedTable = dasTable instanceof DasTable;
         e.getPresentation().setVisible(isSelectedTable);
     }
 

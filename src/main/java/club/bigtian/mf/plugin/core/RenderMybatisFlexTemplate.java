@@ -226,7 +226,8 @@ public class RenderMybatisFlexTemplate {
                         String classPrefix = ObjectUtil.equal(MybatisFlexConstant.SERVICE, info.getTitle())
                                 ? ObjectUtil.defaultIfNull(config.getInterfacePre(), "I") : "";
                         String fileName = classPrefix + className + suffixMap.get(info.getTitle()) + info.getSuffix();
-                        PsiFile file = factory.createFileFromText(fileName, StrUtil.endWithIgnoreCase(info.getSuffix(), "xml") ? XmlFileType.INSTANCE : JavaFileType.INSTANCE, sw.toString());
+                        JavaFileType instance = JavaFileType.INSTANCE;
+                        PsiFile file = factory.createFileFromText(fileName, StrUtil.endWithIgnoreCase(info.getSuffix(), "xml") ? XmlFileType.INSTANCE :instance, sw.toString());
                         templateMap.computeIfAbsent(packageDirectory, k -> new ArrayList<>()).add(CodeReformat.reformat(file));
                     });
                     continue;

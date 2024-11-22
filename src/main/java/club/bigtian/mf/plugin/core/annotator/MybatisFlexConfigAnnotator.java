@@ -99,13 +99,14 @@ public class MybatisFlexConfigAnnotator implements Annotator {
                     //     text = trim;
                     // }
                 }
+
                 MybatisFlexConfigAnnotator.element = element;
                 MybatisFlexConfigAnnotator.lineNumber = lineNumber;
                 if (checkInBracket(text)) {
                     text = getBracketContent(text);
                 }
                 String key = StrUtil.subBefore(text, "(", false);
-                if (StrUtil.containsAny(text, "query()", "queryChain()", "updateChain()", "toQueryWrapper()")) {
+                if (StrUtil.containsAny(text, "query()", "queryChain()", "updateChain()", "toQueryWrapper()", "new QueryWrapper()")) {
                     key = "QueryWrapper.create";
                 }
                 Function<String, String> function = functionMap.get(key);
@@ -228,7 +229,13 @@ public class MybatisFlexConfigAnnotator implements Annotator {
      * @param text 文本
      */
     private static String handlerVariable(String text) {
+        Map<String, String> variableMap = computeVariableValues(element);
+        for (Map.Entry<String, String> entry : variableMap.entrySet()) {
+            text = text.replace(entry.getKey(), entry.getValue());
+        }
+
         for (String key : allMethodList) {
+
             if (!text.contains(StrUtil.format(".{}(", key))) {
                 continue;
             }
@@ -251,8 +258,10 @@ public class MybatisFlexConfigAnnotator implements Annotator {
                     if (compute.contains(",")) {
                         newKey = getKey(key, getSymbol(split[0]) + ",el->true");
                     } else {
+
                         s = s.contains("(") ? compute : s;
                         newKey = getKey(key, getSymbol(s).toString());
+
                     }
                 } else {
                     String column = split[0];
@@ -268,6 +277,39 @@ public class MybatisFlexConfigAnnotator implements Annotator {
         return commonReplace(text);
     }
 
+    private static Map<String, String> computeVariableValues(PsiElement element) {
+        PsiElement parent = element.getParent();
+        while (!(parent instanceof PsiMethod)) {
+            if (parent == null) {
+                return Map.of();
+            }
+            parent = parent.getParent();
+        }
+        PsiMethod psiMethod = (PsiMethod) parent;
+        PsiCodeBlock body = psiMethod.getBody();
+        if (body == null) {
+            return Map.of();
+        }
+        Map<String, String> variableMap = new HashMap<>();
+        for (PsiStatement statement : body.getStatements()) {
+            if (statement instanceof PsiDeclarationStatement) {
+                PsiDeclarationStatement declaration = (PsiDeclarationStatement) statement;
+                for (PsiElement declaredElement : declaration.getDeclaredElements()) {
+                    if (declaredElement instanceof PsiLocalVariable) {
+                        PsiLocalVariable variable = (PsiLocalVariable) declaredElement;
+                        String variableName = variable.getName();
+                        PsiExpression initializer = variable.getInitializer();
+                        if (initializer != null) {
+                            String variableValue = initializer.getText();
+                            // 根据需要处理变量值
+                            variableMap.put(variableName, variableValue);
+                        }
+                    }
+                }
+            }
+        }
+        return variableMap;
+    }
     /**
      * 常见替换
      *

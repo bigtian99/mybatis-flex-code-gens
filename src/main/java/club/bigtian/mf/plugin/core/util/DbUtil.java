@@ -32,6 +32,7 @@ public class DbUtil {
         Project project = ProjectUtils.getCurrentProject();
         MybatisFlexConfig config = Template.getMybatisFlexConfig();
         DbPsiFacade dbPsiFacade = DbPsiFacade.getInstance(project);
+
         Collection<DbDataSource> dataSources = dbPsiFacade.getDataSources();
         if (CollUtil.isEmpty(dataSources)) {
             CopyPasteManager.getInstance().setContents(new StringSelection(FORMATTER.format(sql)));

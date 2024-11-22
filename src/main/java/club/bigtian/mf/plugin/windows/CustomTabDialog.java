@@ -145,6 +145,7 @@ public class CustomTabDialog extends JDialog {
         FileChooserDescriptor chooserDescriptor = FileChooserDescriptorFactory.createSingleFolderDescriptor();
         genPath.addBrowseFolderListener("选择生成路径", "选择生成路径", null, chooserDescriptor);
 
+
         title.getDocument().addDocumentListener(new DocumentAdapter() {
             @Override
             protected void textChanged(@NotNull DocumentEvent e) {

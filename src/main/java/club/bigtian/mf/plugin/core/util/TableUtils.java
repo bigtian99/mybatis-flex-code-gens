@@ -12,11 +12,10 @@ import cn.hutool.core.util.StrUtil;
 import com.intellij.database.dialects.DatabaseDialectEx;
 import com.intellij.database.model.*;
 import com.intellij.database.psi.DbDataSourceImpl;
-import com.intellij.database.psi.DbElement;
+import com.intellij.database.psi.DbPsiFacade;
 import com.intellij.database.psi.DbTableImpl;
 import com.intellij.database.util.JdbcUtil;
 import com.intellij.openapi.actionSystem.AnActionEvent;
-import com.intellij.openapi.actionSystem.CommonDataKeys;
 import com.intellij.openapi.actionSystem.DataKey;
 import com.intellij.util.containers.JBIterable;
 import org.jetbrains.annotations.NotNull;
@@ -36,6 +35,17 @@ public class TableUtils {
      * @return {@code List<TableInfo>}
      */
     public static List<String> getSelectedTableName(AnActionEvent actionEvent) {
+        return getSelectedTable(actionEvent).stream().map(DasTable::getName).collect(Collectors.toList());
+    }
+
+    /**
+     * 得到选中表
+     *
+     * @param actionEvent 行动事件
+     * @return {@code List<DasTable>}
+     */
+
+    public static List<DasTable> getSelectedTable(AnActionEvent actionEvent) {
         DataKey<Object[]> databaseNodes = DataKey.create("DATABASE_NODES");
         Object[] data = actionEvent.getData(databaseNodes);
         if (ArrayUtil.isEmpty(data)) {
@@ -43,9 +53,12 @@ public class TableUtils {
         }
         return Arrays.stream(data).map(item -> {
             DasTable dasTable = (DasTable) item;
-            return dasTable.getName();
+            return dasTable;
         }).collect(Collectors.toList());
+    }
 
+    public static DasTable getSelectedSingleTable(AnActionEvent actionEvent) {
+        return getSelectedTable(actionEvent).get(0);
     }
 
     /**
@@ -55,9 +68,7 @@ public class TableUtils {
      * @return {@code List<TableInfo>}
      */
     public static List<TableInfo> getAllTables(AnActionEvent event) {
-        DbTableImpl table = (DbTableImpl) event.getData(CommonDataKeys.PSI_ELEMENT);
-        DbElement tableParent = table.getParent();
-        assert tableParent != null;
+        DasObject tableParent = TableUtils.getSelectedSingleTable(event).getDasParent();
         List<DasTable> list = tableParent.getDasChildren(ObjectKind.TABLE).map(el -> (DasTable) el)
                 .toList();
         List<DasTable> viewList = tableParent.getDasChildren(ObjectKind.VIEW).map(el -> (DasTable) el)
@@ -75,7 +86,8 @@ public class TableUtils {
      * @return {@code DatabaseDialectEx}
      */
     public static DatabaseDialectEx getDialect(DasTable dasTable) {
-        DbTableImpl table = (DbTableImpl) dasTable;
+        DbPsiFacade dbPsiFacade = DbPsiFacade.getInstance(ProjectUtils.getCurrentProject());
+        DbTableImpl table = (DbTableImpl) dbPsiFacade.findElement(dasTable);
         DbDataSourceImpl dataSource = table.getDataSource();
         return dataSource.getDatabaseDialect();
     }

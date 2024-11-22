@@ -1,30 +1,33 @@
 plugins {
-    id("java")
-    id("org.jetbrains.kotlin.jvm") version "1.9.24"
-    id("org.jetbrains.intellij") version "1.17.3"
+    id("java") // Java support
+    alias(libs.plugins.kotlin) // Kotlin support
+    alias(libs.plugins.intelliJPlatform) // IntelliJ Platform Gradle Plugin
+    alias(libs.plugins.changelog) // Gradle Changelog Plugin
+    alias(libs.plugins.qodana) // Gradle Qodana Plugin
+    alias(libs.plugins.kover) // Gradle Kover Plugin
 }
 
-group = "com.mybatisflex.plugin"
-version = "1.6.7-RELEASE"
 
+group = providers.gradleProperty("pluginGroup").get()
+version = providers.gradleProperty("pluginVersion").get()
+// Set the JVM language level used to build the project.
+kotlin {
+    jvmToolchain(17)
+}
+
+// Configure project's dependencies
 repositories {
-    maven {
-        setUrl("https://maven.aliyun.com/nexus/content/groups/public/")
+    mavenCentral()
+
+    // IntelliJ Platform Gradle Plugin Repositories Extension - read more: https://plugins.jetbrains.com/docs/intellij/tools-intellij-platform-gradle-plugin-repositories-extension.html
+    intellijPlatform {
+        defaultRepositories()
     }
 }
 
-// Configure Gradle IntelliJ Plugin
-// Read more: https://plugins.jetbrains.com/docs/intellij/tools-gradle-intellij-plugin.html
-intellij {
-//    version.set("2023.2.6")
-    version.set("2024.1")
-
-//    version.set("2022.2.5")
-    type.set("IU") // Target IDE Platform
-    plugins.set(listOf("com.intellij.java", "org.jetbrains.kotlin", "com.intellij.database","com.intellij.spring.boot"))
-}
-
+// Dependencies are managed with Gradle version catalog - read more: https://docs.gradle.org/current/userguide/platforms.html#sub:version-catalog
 dependencies {
+    testImplementation(libs.junit)
     implementation("org.yaml:snakeyaml:2.2")
     implementation("com.alibaba.fastjson2:fastjson2:2.0.52")
     implementation("cn.hutool:hutool-core:5.8.29")
@@ -35,46 +38,113 @@ dependencies {
     annotationProcessor("org.projectlombok:lombok:1.18.34")  // 注解处理器依赖
     // 测试相关的Lombok支持
     testCompileOnly("org.projectlombok:lombok:1.18.34")
+    // IntelliJ Platform Gradle Plugin Dependencies Extension - read more: https://plugins.jetbrains.com/docs/intellij/tools-intellij-platform-gradle-plugin-dependencies-extension.html
+    intellijPlatform {
+        create(providers.gradleProperty("platformType"), providers.gradleProperty("platformVersion"))
 
+        // Plugin Dependencies. Uses `platformBundledPlugins` property from the gradle.properties file for bundled IntelliJ Platform plugins.
+        bundledPlugins(providers.gradleProperty("platformBundledPlugins").map { it.split(',') })
+
+        // Plugin Dependencies. Uses `platformPlugins` property from the gradle.properties file for plugin from JetBrains Marketplace.
+//        plugins(providers.gradleProperty("platformPlugins").map { it.split(',') })
+
+        instrumentationTools()
+        pluginVerifier()
+        zipSigner()
+    }
 }
-java {
-    sourceCompatibility = JavaVersion.VERSION_17
-    targetCompatibility = JavaVersion.VERSION_17
+
+// Configure IntelliJ Platform Gradle Plugin - read more: https://plugins.jetbrains.com/docs/intellij/tools-intellij-platform-gradle-plugin-extension.html
+intellijPlatform {
+    pluginConfiguration {
+        version = providers.gradleProperty("pluginVersion")
+
+
+        ideaVersion {
+            sinceBuild = providers.gradleProperty("pluginSinceBuild")
+            untilBuild = providers.gradleProperty("pluginUntilBuild")
+        }
+    }
+
+    signing {
+        certificateChain = providers.environmentVariable("CERTIFICATE_CHAIN")
+        privateKey = providers.environmentVariable("PRIVATE_KEY")
+        password = providers.environmentVariable("PRIVATE_KEY_PASSWORD")
+    }
+
+    publishing {
+        token = providers.environmentVariable("PUBLISH_TOKEN")
+        // The pluginVersion is based on the SemVer (https://semver.org) and supports pre-release labels, like 2.1.7-alpha.3
+        // Specify pre-release label to publish the plugin in a custom Release Channel automatically. Read more:
+        // https://plugins.jetbrains.com/docs/intellij/deployment.html#specifying-a-release-channel
+        channels = providers.gradleProperty("pluginVersion")
+            .map { listOf(it.substringAfter('-', "").substringBefore('.').ifEmpty { "default" }) }
+    }
+
+    pluginVerification {
+        ides {
+            recommended()
+        }
+    }
+}
+
+// Configure Gradle Changelog Plugin - read more: https://github.com/JetBrains/gradle-changelog-plugin
+changelog {
+    groups.empty()
+    repositoryUrl = providers.gradleProperty("pluginRepositoryUrl")
+}
+
+// Configure Gradle Kover Plugin - read more: https://github.com/Kotlin/kotlinx-kover#configuration
+kover {
+    reports {
+        total {
+            xml {
+                onCheck = true
+            }
+        }
+    }
 }
 
 tasks {
-    runIde {
-        // 启用热重载功能，使用Build菜单编译项目后无需重启调试进程即可完成, 仅支持JBR
-        jvmArgs = listOf(
-//            "-XX:+AllowEnhancedClassRedefinition",
-            "-javaagent:/Users/daijunxiong/app/jetbra/ja-netfilter.jar=jetbrains",
-            "--add-opens=java.base/jdk.internal.org.objectweb.asm=ALL-UNNAMED",
-            "--add-opens=java.base/jdk.internal.org.objectweb.asm.tree=ALL-UNNAMED"
-        )
+    wrapper {
+        gradleVersion = providers.gradleProperty("gradleVersion").get()
 
     }
-    // Set the JVM compatibility versions
-    withType<JavaCompile> {
-        sourceCompatibility = "17"
-        targetCompatibility = "17"
-        options.encoding = "utf-8"
-    }
-    withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile> {
-        kotlinOptions.jvmTarget = "17"
-    }
 
-    patchPluginXml {
-        sinceBuild.set("232.*")
-        untilBuild.set("243.*")
-    }
-
-    signPlugin {
-        certificateChain.set(System.getenv("CERTIFICATE_CHAIN"))
-        privateKey.set(System.getenv("PRIVATE_KEY"))
-        password.set(System.getenv("PRIVATE_KEY_PASSWORD"))
-    }
     publishPlugin {
-        token.set(System.getenv("ORG_GRADLE_PROJECT_intellijPublishToken"))
+        dependsOn(patchChangelog)
     }
-
 }
+
+intellijPlatformTesting {
+    runIde {
+        tasks{
+            runIde{
+                jvmArgumentProviders += CommandLineArgumentProvider {
+                    listOf(
+                        "-javaagent:/Users/daijunxiong/app/jetbra/ja-netfilter.jar=jetbrains",  // 添加的 JVM 参数
+                        "--add-opens=java.base/jdk.internal.org.objectweb.asm=ALL-UNNAMED",
+                        "--add-opens=java.base/jdk.internal.org.objectweb.asm.tree=ALL-UNNAMED"
+                    )
+                }
+            }
+        }
+        register("runIdeForUiTests") {
+            task {
+                // 添加 JVM 参数
+                jvmArgumentProviders += CommandLineArgumentProvider {
+                    listOf(
+                        "-javaagent:/Users/daijunxiong/app/jetbra/ja-netfilter.jar=jetbrains",  // 添加的 JVM 参数
+                        "--add-opens=java.base/jdk.internal.org.objectweb.asm=ALL-UNNAMED",
+                        "--add-opens=java.base/jdk.internal.org.objectweb.asm.tree=ALL-UNNAMED"
+                    )
+                }
+            }
+
+            plugins {
+                robotServerPlugin()  // 插件配置（如果有）
+            }
+        }
+    }
+}
+
