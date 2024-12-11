@@ -9,12 +9,15 @@ import cn.hutool.core.util.ArrayUtil;
 import cn.hutool.core.util.ObjectUtil;
 import cn.hutool.core.util.ReUtil;
 import cn.hutool.core.util.StrUtil;
+import com.intellij.database.DbModelRegistry;
 import com.intellij.database.dialects.DatabaseDialectEx;
 import com.intellij.database.model.*;
 import com.intellij.database.psi.DbDataSourceImpl;
+import com.intellij.database.psi.DbElement;
 import com.intellij.database.psi.DbPsiFacade;
 import com.intellij.database.psi.DbTableImpl;
 import com.intellij.database.util.JdbcUtil;
+import com.intellij.database.view.DatabaseCoreUiServiceImpl;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.DataKey;
 import com.intellij.util.containers.JBIterable;
@@ -87,7 +90,7 @@ public class TableUtils {
      */
     public static DatabaseDialectEx getDialect(DasTable dasTable) {
         DbPsiFacade dbPsiFacade = DbPsiFacade.getInstance(ProjectUtils.getCurrentProject());
-        DbTableImpl table = (DbTableImpl) dbPsiFacade.findElement(dasTable);
+        DbTableImpl table = (DbTableImpl) ((DbModelRegistry) ProjectUtils.getCurrentProject().getService(DbModelRegistry.class)).findDbElement(dasTable);
         DbDataSourceImpl dataSource = table.getDataSource();
         return dataSource.getDatabaseDialect();
     }

@@ -1,6 +1,7 @@
 package club.bigtian.mf.plugin.windows;
 
 import club.bigtian.mf.plugin.core.util.DialogUtil;
+import club.bigtian.mf.plugin.core.util.ProjectUtils;
 import club.bigtian.mf.plugin.entity.TabInfo;
 import cn.hutool.core.util.StrUtil;
 import com.intellij.openapi.fileChooser.FileChooserDescriptor;
@@ -47,8 +48,10 @@ public class CustomTabDialog extends JDialog {
         // call onCancel() on ESCAPE
         contentPane.registerKeyboardAction(e -> onCancel(), KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0), JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT);
         FileChooserDescriptor chooserDescriptor = FileChooserDescriptorFactory.createSingleFolderDescriptor();
-        genPath.addBrowseFolderListener("选择生成路径", "选择生成路径", null, chooserDescriptor);
-
+        chooserDescriptor.setTitle("选择生成路径");
+        chooserDescriptor.setDescription("选择生成路径");
+        // genPath.addBrowseFolderListener("选择生成路径", "选择生成路径", null, chooserDescriptor);
+        genPath.addBrowseFolderListener(ProjectUtils.getCurrentProject(), chooserDescriptor);
 
         title.getDocument().addDocumentListener(new DocumentAdapter() {
             @Override
@@ -143,7 +146,10 @@ public class CustomTabDialog extends JDialog {
         // call onCancel() on ESCAPE
         contentPane.registerKeyboardAction(e -> onCancel(), KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0), JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT);
         FileChooserDescriptor chooserDescriptor = FileChooserDescriptorFactory.createSingleFolderDescriptor();
-        genPath.addBrowseFolderListener("选择生成路径", "选择生成路径", null, chooserDescriptor);
+        chooserDescriptor.setTitle("选择生成路径");
+        chooserDescriptor.setDescription("选择生成路径");
+        // genPath.addBrowseFolderListener("选择生成路径", "选择生成路径", null, chooserDescriptor);
+        genPath.addBrowseFolderListener(ProjectUtils.getCurrentProject(), chooserDescriptor);
 
 
         title.getDocument().addDocumentListener(new DocumentAdapter() {
