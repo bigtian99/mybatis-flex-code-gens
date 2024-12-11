@@ -33,7 +33,7 @@ public class KtFileUtil {
                         Modules.getModuleFromDirectory(psiFile.getContainingDirectory()),
                         false,
                         false,
-                        false
+                        true // Enable K2 support
                 );
                 ktFiles.addAll(ktFiles1);
             }

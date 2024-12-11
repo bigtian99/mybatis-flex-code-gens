@@ -94,7 +94,7 @@ public class ColumnInfo {
     }
 
     public void setNotNull(boolean notNull) {
-        notNull = notNull;
+        this.notNull = notNull;
     }
 
     public String getMethodName() {
