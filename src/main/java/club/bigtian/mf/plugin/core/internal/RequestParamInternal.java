@@ -71,25 +71,75 @@ public class RequestParamInternal implements IntentionAction, Iconable {
             return false;
         }
 
-        // 获取方法的所有参数
-        PsiParameter[] parameters = psiMethod.getParameterList().getParameters();
-        if (parameters.length == 0) {
+        // 获取URL路径
+        String urlPath = getRequestMappingPath(psiMethod);
+        if (urlPath == null) {
             return false;
         }
 
-        // 检查是否至少有一个参数没有 @PathVariable 或 @RequestParam 注解
-        boolean hasParameterWithoutAnnotation = false;
-        for (PsiParameter parameter : parameters) {
-            PsiAnnotation pathVarAnnotation = parameter.getAnnotation(QualifiedNameConstant.SPRING_PATH_VARIABLE);
-            PsiAnnotation requestParamAnnotation = parameter.getAnnotation(QualifiedNameConstant.SPRING_REQUEST_PARAM);
-            if (pathVarAnnotation == null && requestParamAnnotation == null) {
-                hasParameterWithoutAnnotation = true;
-                break;
+        // 获取URL中的所有路径变量
+        java.util.Set<String> pathVariables = new java.util.HashSet<>();
+        java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("\\{([^}]+)}");
+        java.util.regex.Matcher matcher = pattern.matcher(urlPath);
+        while (matcher.find()) {
+            pathVariables.add(matcher.group(1));
+        }
+
+        // 如果URL中没有路径变量，检查是否有参数需要添加@RequestParam
+        if (pathVariables.isEmpty()) {
+            PsiParameter[] parameters = psiMethod.getParameterList().getParameters();
+            if (parameters.length == 0) {
+                return false;
+            }
+            // 检查是否有参数没有注解
+            for (PsiParameter parameter : parameters) {
+                PsiAnnotation pathVarAnnotation = parameter.getAnnotation(QualifiedNameConstant.SPRING_PATH_VARIABLE);
+                PsiAnnotation requestParamAnnotation = parameter
+                        .getAnnotation(QualifiedNameConstant.SPRING_REQUEST_PARAM);
+                if (pathVarAnnotation == null && requestParamAnnotation == null) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        // 检查URL中的路径变量是否都有对应的参数
+        PsiParameter[] parameters = psiMethod.getParameterList().getParameters();
+        for (String pathVar : pathVariables) {
+            boolean hasMatchingParam = false;
+            for (PsiParameter parameter : parameters) {
+                if (parameter.getName().equals(pathVar)) {
+                    // 如果找到同名参数，检查是否有@PathVariable注解
+                    PsiAnnotation pathVarAnnotation = parameter
+                            .getAnnotation(QualifiedNameConstant.SPRING_PATH_VARIABLE);
+                    if (pathVarAnnotation == null) {
+                        return true; // 参数存在但没有@PathVariable注解
+                    }
+                    hasMatchingParam = true;
+                    break;
+                }
+            }
+            if (!hasMatchingParam) {
+                return true; // URL中有路径变量，但没有对应的参数
             }
         }
 
-        return hasParameterWithoutAnnotation;
+        // 检查是否有其他参数需要添加@RequestParam
+        for (PsiParameter parameter : parameters) {
+            // 如果参数名不在路径变量中，且没有任何注解
+            if (!pathVariables.contains(parameter.getName())) {
+                PsiAnnotation pathVarAnnotation = parameter.getAnnotation(QualifiedNameConstant.SPRING_PATH_VARIABLE);
+                PsiAnnotation requestParamAnnotation = parameter
+                        .getAnnotation(QualifiedNameConstant.SPRING_REQUEST_PARAM);
+                if (pathVarAnnotation == null && requestParamAnnotation == null) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
+
 
     @Override
     public void invoke(@NotNull Project project, Editor editor, PsiFile file) throws IncorrectOperationException {
@@ -115,6 +165,7 @@ public class RequestParamInternal implements IntentionAction, Iconable {
                         PsiJavaFileUtil.getPsiClass(QualifiedNameConstant.SPRING_REQUEST_PARAM)));
             }
 
+            // 为现有参数添加注解
             for (PsiParameter parameter : parameters) {
                 // 检查参数是否已经有注解
                 PsiAnnotation pathVarAnnotation = parameter.getAnnotation(QualifiedNameConstant.SPRING_PATH_VARIABLE);
@@ -137,6 +188,42 @@ public class RequestParamInternal implements IntentionAction, Iconable {
                     }
 
                     parameter.getModifierList().addBefore(annotation, null);
+                }
+            }
+
+            // 检查URL中的路径变量是否都有对应的参数
+            if (urlPath != null) {
+                java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("\\{([^}]+)}");
+                java.util.regex.Matcher matcher = pattern.matcher(urlPath);
+
+                while (matcher.find()) {
+                    String pathVarName = matcher.group(1);
+                    boolean parameterExists = false;
+
+                    // 检查这个路径变量是否已经有对应的参数
+                    for (PsiParameter parameter : parameters) {
+                        if (parameter.getName().equals(pathVarName)) {
+                            parameterExists = true;
+                            break;
+                        }
+                    }
+
+                    // 如果没有对应的参数，添加一个新参数
+                    if (!parameterExists) {
+                        // 创建新的参数
+                        PsiAnnotation pathVarAnnotation = psiElementFactory.createAnnotationFromText(
+                                "@PathVariable(\"" + pathVarName + "\")", null);
+
+                        // 默认使用String类型，你也可以根据需要修改
+                        String parameterText = "String " + pathVarName;
+                        PsiParameter newParameter = psiElementFactory.createParameterFromText(parameterText, psiMethod);
+
+                        // 添加注解到新参数
+                        newParameter.getModifierList().addBefore(pathVarAnnotation, null);
+
+                        // 添加新参数到方法
+                        psiMethod.getParameterList().add(newParameter);
+                    }
                 }
             }
         });
@@ -185,6 +272,7 @@ public class RequestParamInternal implements IntentionAction, Iconable {
 
 
 
+
     @Override
     public @NotNull IntentionPreviewInfo generatePreview(@NotNull Project project, @NotNull Editor editor,
                                                          @NotNull PsiFile file) {
@@ -204,6 +292,7 @@ public class RequestParamInternal implements IntentionAction, Iconable {
         PsiParameter[] parameters = psiMethod.getParameterList().getParameters();
         StringJoiner previewText = new StringJoiner(",\n    ");
 
+        // 先处理现有参数
         for (PsiParameter parameter : parameters) {
             // 检查参数是否已经有注解
             PsiAnnotation pathVarAnnotation = parameter.getAnnotation(QualifiedNameConstant.SPRING_PATH_VARIABLE);
@@ -230,6 +319,35 @@ public class RequestParamInternal implements IntentionAction, Iconable {
                     .append(paramName);
 
             previewText.add(builder.toString());
+        }
+
+        // 检查URL中的路径变量，添加缺失的参数
+        if (urlPath != null) {
+            java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("\\{([^}]+)}");
+            java.util.regex.Matcher matcher = pattern.matcher(urlPath);
+
+            while (matcher.find()) {
+                String pathVarName = matcher.group(1);
+                boolean parameterExists = false;
+
+                // 检查这个路径变量是否已经有对应的参数
+                for (PsiParameter parameter : parameters) {
+                    if (parameter.getName().equals(pathVarName)) {
+                        parameterExists = true;
+                        break;
+                    }
+                }
+
+                // 如果没有对应的参数，添加到预览中
+                if (!parameterExists) {
+                    StringBuilder builder = new StringBuilder();
+                    builder.append("@PathVariable(\"")
+                            .append(pathVarName)
+                            .append("\") String ")
+                            .append(pathVarName);
+                    previewText.add(builder.toString());
+                }
+            }
         }
 
         // 构建完整的方法预览
