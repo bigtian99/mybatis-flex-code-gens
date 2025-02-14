@@ -6,8 +6,6 @@ import club.bigtian.mf.plugin.core.icons.Icons;
 import club.bigtian.mf.plugin.core.util.PluginUtil;
 import club.bigtian.mf.plugin.core.util.PsiJavaFileUtil;
 import cn.hutool.core.util.ObjectUtil;
-import cn.hutool.core.util.ReUtil;
-import cn.hutool.core.util.StrUtil;
 import com.intellij.codeInsight.intention.IntentionAction;
 import com.intellij.codeInsight.intention.preview.IntentionPreviewInfo;
 import com.intellij.codeInspection.util.IntentionFamilyName;
@@ -20,16 +18,12 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Iconable;
 import com.intellij.psi.*;
 import com.intellij.psi.util.PsiTreeUtil;
-import com.intellij.psi.xml.XmlFile;
 import com.intellij.util.IncorrectOperationException;
 import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
-import java.util.Map;
 import java.util.StringJoiner;
 
-import static club.bigtian.mf.plugin.core.util.PsiJavaFileUtil.methodHasAnnotation;
-import static club.bigtian.mf.plugin.core.util.VirtualFileUtils.getAllResourceFiles;
 
 /**
  * 添加 @Params 注解
@@ -47,6 +41,7 @@ public class RequestParamInternal implements IntentionAction, Iconable {
     }
 
 
+
     @Override
     public boolean isAvailable(@NotNull Project project, Editor editor, PsiFile file) {
         if (!(file instanceof PsiJavaFile)
@@ -59,6 +54,20 @@ public class RequestParamInternal implements IntentionAction, Iconable {
         PsiMethod psiMethod = PsiTreeUtil.getParentOfType(elementAt, PsiMethod.class);
 
         if (ObjectUtil.isNull(psiMethod)) {
+            return false;
+        }
+
+        // 检查是否是Controller类
+        PsiClass containingClass = psiMethod.getContainingClass();
+        if (containingClass == null) {
+            return false;
+        }
+
+        // 检查是否有@Controller或@RestController注解
+        PsiAnnotation controllerAnnotation = containingClass.getAnnotation(QualifiedNameConstant.SPRING_CONTROLLER);
+        PsiAnnotation restControllerAnnotation = containingClass
+                .getAnnotation(QualifiedNameConstant.SPRING_REST_CONTROLLER);
+        if (controllerAnnotation == null && restControllerAnnotation == null) {
             return false;
         }
 
