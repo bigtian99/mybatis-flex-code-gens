@@ -32,12 +32,12 @@ public class RequestParamInternal implements IntentionAction, Iconable {
 
     @Override
     public @IntentionName @NotNull String getText() {
-        return "Auto Identify Add @RequestParam Or @PathVariable";
+        return "Auto identify add @requestParam or @pathVariable";
     }
 
     @Override
     public @NotNull @IntentionFamilyName String getFamilyName() {
-        return "RequestParamInternal";
+        return "Auto identify add @requestParam or @pathVariable";
     }
 
 
