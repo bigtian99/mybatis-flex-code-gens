@@ -11,4 +11,6 @@ public class QualifiedNameConstant {
      * mybatis 参数注解
      */
     public static final String MYBATIS_PARAM ="org.apache.ibatis.annotations.Param";
+    public static final String SPRING_REQUEST_PARAM = "org.springframework.web.bind.annotation.RequestParam";
+    public static final String SPRING_PATH_VARIABLE = "org.springframework.web.bind.annotation.PathVariable";
 }
