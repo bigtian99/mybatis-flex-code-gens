@@ -1,11 +1,14 @@
 package club.bigtian.mf.plugin.entity;
 
+import lombok.Data;
+
 /**
  * 列信息
  *
  * @author daijunxiong
  * @date 2023/06/22
  */
+@Data
 public class ColumnInfo {
     /**
      * 列名
@@ -57,132 +60,6 @@ public class ColumnInfo {
 
     private String updateValue;
 
-    public String getInsertValue() {
-        return insertValue;
-    }
+    private int size;
 
-    public void setInsertValue(String insertValue) {
-        this.insertValue = insertValue;
-    }
-
-    public String getUpdateValue() {
-        return updateValue;
-    }
-
-    public void setUpdateValue(String updateValue) {
-        this.updateValue = updateValue;
-    }
-
-    public boolean isTenant() {
-        return tenant;
-    }
-
-    public void setTenant(boolean tenant) {
-        this.tenant = tenant;
-    }
-
-    public boolean isVersion() {
-        return version;
-    }
-
-    public void setVersion(boolean version) {
-        this.version = version;
-    }
-
-    public boolean isNotNull() {
-        return notNull;
-    }
-
-    public void setNotNull(boolean notNull) {
-        this.notNull = notNull;
-    }
-
-    public String getMethodName() {
-        return methodName;
-    }
-
-    public void setMethodName(String methodName) {
-        this.methodName = methodName;
-    }
-
-    public String getFieldType() {
-        return fieldType;
-    }
-
-    public void setFieldType(String fieldType) {
-        this.fieldType = fieldType;
-    }
-
-    public String getFieldName() {
-        return fieldName;
-    }
-
-    public void setFieldName(String fieldName) {
-        this.fieldName = fieldName;
-    }
-
-    public String getName() {
-        return name;
-    }
-
-    public void setName(String name) {
-        this.name = name;
-    }
-
-    public String getType() {
-        return type;
-    }
-
-    public void setType(String type) {
-        this.type = type;
-    }
-
-    public String getComment() {
-        return comment;
-    }
-
-    public void setComment(String comment) {
-        this.comment = comment;
-    }
-
-    public boolean isPrimaryKey() {
-        return primaryKey;
-    }
-
-    public void setPrimaryKey(boolean primaryKey) {
-        this.primaryKey = primaryKey;
-    }
-
-    public boolean isAutoIncrement() {
-        return isAutoIncrement;
-    }
-
-    public void setAutoIncrement(boolean autoIncrement) {
-        isAutoIncrement = autoIncrement;
-    }
-
-
-    public boolean isLogicDelete() {
-        return logicDelete;
-    }
-
-    public void setLogicDelete(boolean logicDelete) {
-        this.logicDelete = logicDelete;
-    }
-
-    @Override
-    public String toString() {
-        return "ColumnInfo{" +
-                "name='" + name + '\'' +
-                ", fieldName='" + fieldName + '\'' +
-                ", fieldType='" + fieldType + '\'' +
-                ", type='" + type + '\'' +
-                ", comment='" + comment + '\'' +
-                ", primaryKey=" + primaryKey +
-                ", isAutoIncrement=" + isAutoIncrement +
-                ", methodName='" + methodName + '\'' +
-                ", notNull=" + notNull +
-                ", logicDelete=" + logicDelete +
-                '}';
-    }
 }
