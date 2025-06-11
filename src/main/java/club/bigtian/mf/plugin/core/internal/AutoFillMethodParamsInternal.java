@@ -24,19 +24,19 @@ import java.util.List;
 import java.util.StringJoiner;
 
 /**
- * 自动填充方法参数
- * 将外层方法的参数按顺序填充到内层方法调用中
+ * Auto fill method parameters
+ * Fill the parameters from outer method to inner method call
  */
 public class AutoFillMethodParamsInternal implements IntentionAction, Iconable {
 
     @Override
     public @IntentionName @NotNull String getText() {
-        return "自动填充方法参数";
+        return "Auto Fill Method Parameters";
     }
 
     @Override
     public @NotNull @IntentionFamilyName String getFamilyName() {
-        return "自动填充方法参数";
+        return "Auto Fill Method Parameters";
     }
 
     @Override
@@ -46,29 +46,47 @@ public class AutoFillMethodParamsInternal implements IntentionAction, Iconable {
             return false;
         }
 
-        SelectionModel selectionModel = editor.getSelectionModel();
+       SelectionModel selectionModel = editor.getSelectionModel();
         int offset = selectionModel.getSelectionStart();
         PsiElement elementAt = file.findElementAt(offset);
 
-        // 检查是否在方法调用处或可能的方法调用位置
+        // Check if cursor is at a method call or possible method call location
         PsiMethodCallExpression methodCall = PsiTreeUtil.getParentOfType(elementAt, PsiMethodCallExpression.class);
         if (methodCall == null) {
-            // 可能是在尚未完成的方法调用处
+            // May be at an incomplete method call
             PsiReferenceExpression refExpr = PsiTreeUtil.getParentOfType(elementAt, PsiReferenceExpression.class);
             if (refExpr == null) {
                 return false;
             }
         }
 
-        // 检查是否在一个方法内部
+        // Check if inside a method
         PsiMethod outerMethod = PsiTreeUtil.getParentOfType(elementAt, PsiMethod.class);
         if (outerMethod == null) {
             return false;
         }
 
-        // 检查外部方法是否有参数
+        // Check if outer method has parameters
         PsiParameter[] outerParameters = outerMethod.getParameterList().getParameters();
-        return outerParameters.length > 0;
+        if (outerParameters.length == 0) {
+            return false;
+        }
+
+        // If we have a method call, check if parameters count is different
+        if (methodCall != null) {
+            PsiExpressionList argumentList = methodCall.getArgumentList();
+            if (argumentList == null) {
+                return false;
+            }
+
+            PsiExpression[] arguments = argumentList.getExpressions();
+
+            // Only show intention if parameter counts are different
+            // If they're the same, no need for auto-filling
+            return arguments.length != outerParameters.length;
+        }
+
+        return true;
     }
 
     @Override
@@ -77,42 +95,43 @@ public class AutoFillMethodParamsInternal implements IntentionAction, Iconable {
         int offset = selectionModel.getSelectionStart();
         PsiElement elementAt = file.findElementAt(offset);
 
-        // 获取方法调用表达式
+        // Get method call expression
         PsiMethodCallExpression methodCall = PsiTreeUtil.getParentOfType(elementAt, PsiMethodCallExpression.class);
         if (methodCall == null) {
-            return; // 如果不是完整的方法调用，可能我们需要处理引用表达式，目前暂不处理
+            return; // If not a complete method call, we might need to handle reference expressions,
+                    // but skipping for now
         }
 
-        // 获取外部方法
+        // Get outer method
         PsiMethod outerMethod = PsiTreeUtil.getParentOfType(methodCall, PsiMethod.class);
         if (outerMethod == null) {
             return;
         }
 
-        // 获取外部方法的参数
+        // Get outer method parameters
         PsiParameter[] outerParameters = outerMethod.getParameterList().getParameters();
 
-        // 获取方法调用的参数列表
+        // Get method call parameter list
         PsiExpressionList argumentList = methodCall.getArgumentList();
         PsiExpression[] existingArgs = argumentList.getExpressions();
 
         WriteCommandAction.runWriteCommandAction(project, () -> {
             PsiElementFactory factory = JavaPsiFacade.getElementFactory(project);
 
-            // 创建参数填充列表
+            // Create parameter fill list
             List<String> argTexts = new ArrayList<>();
 
-            // 保留现有的参数
+            // Keep existing parameters
             for (PsiExpression existingArg : existingArgs) {
                 argTexts.add(existingArg.getText());
             }
 
-            // 如果已有参数数量小于外部方法参数数量，则继续添加
+            // If existing args count is less than outer method params, add more
             for (int i = existingArgs.length; i < outerParameters.length; i++) {
                 argTexts.add(outerParameters[i].getName());
             }
 
-            // 构建新的参数列表文本
+            // Build new parameter list text
             StringBuilder argsBuilder = new StringBuilder();
             for (int i = 0; i < argTexts.size(); i++) {
                 argsBuilder.append(argTexts.get(i));
@@ -121,10 +140,10 @@ public class AutoFillMethodParamsInternal implements IntentionAction, Iconable {
                 }
             }
 
-            // 创建新的表达式字符串
+            // Create new expression string
             String methodCallText = methodCall.getMethodExpression().getText() + "(" + argsBuilder.toString() + ")";
 
-            // 替换原有的方法调用
+            // Replace original method call
             PsiExpression newMethodCall = factory.createExpressionFromText(methodCallText, methodCall);
             methodCall.replace(newMethodCall);
         });
@@ -143,51 +162,51 @@ public class AutoFillMethodParamsInternal implements IntentionAction, Iconable {
     @Override
     public @NotNull IntentionPreviewInfo generatePreview(@NotNull Project project, @NotNull Editor editor,
             @NotNull PsiFile file) {
-        String description = "自动填充方法参数";
+        String description = "Auto Fill Method Parameters";
         SelectionModel selectionModel = editor.getSelectionModel();
         int offset = selectionModel.getSelectionStart();
         PsiElement elementAt = file.findElementAt(offset);
 
-        // 获取方法调用表达式
+        // Get method call expression
         PsiMethodCallExpression methodCall = PsiTreeUtil.getParentOfType(elementAt, PsiMethodCallExpression.class);
         if (methodCall == null) {
             return IntentionPreviewInfo.EMPTY;
         }
 
-        // 获取外部方法
+        // Get outer method
         PsiMethod outerMethod = PsiTreeUtil.getParentOfType(methodCall, PsiMethod.class);
         if (outerMethod == null) {
             return IntentionPreviewInfo.EMPTY;
         }
 
-        // 获取外部方法的参数
+        // Get outer method parameters
         PsiParameter[] outerParameters = outerMethod.getParameterList().getParameters();
 
-        // 获取方法调用的参数列表
+        // Get method call parameter list
         PsiExpressionList argumentList = methodCall.getArgumentList();
         PsiExpression[] existingArgs = argumentList.getExpressions();
 
-        // 构建预览文本
+        // Build preview text
         StringJoiner previewText = new StringJoiner(", ");
 
-        // 保留现有的参数
+        // Keep existing parameters
         for (PsiExpression existingArg : existingArgs) {
             previewText.add(existingArg.getText());
         }
 
-        // 如果已有参数数量小于外部方法参数数量，则继续添加
+        // If existing args count is less than outer method params, add more
         for (int i = existingArgs.length; i < outerParameters.length; i++) {
             previewText.add(outerParameters[i].getName());
         }
 
-        // 构建方法调用预览
+        // Build method call preview
         StringBuilder methodCallPreview = new StringBuilder();
         methodCallPreview.append(methodCall.getMethodExpression().getText())
                 .append("(")
                 .append(previewText.toString())
                 .append(")");
 
-        // 构建完整的代码片段
+        // Build complete code snippet
         PsiStatement statement = PsiTreeUtil.getParentOfType(methodCall, PsiStatement.class);
         if (statement == null) {
             return IntentionPreviewInfo.EMPTY;
