@@ -109,4 +109,87 @@ public class TableDefUtils {
 
         }
     }
+
+    /**
+     * 根据实体类的全限定名查找对应的TableDef文件
+     *
+     * @param entityQualifiedName 实体类的全限定名，例如：com.example.entity.User
+     * @param currentFile 当前文件（用于确定模块上下文）
+     * @return 对应的TableDef文件，如果找不到则返回null
+     */
+    public static PsiClassOwner findTableDefByEntityQualifiedName(String entityQualifiedName, VirtualFile currentFile) {
+        if (StrUtil.isEmpty(entityQualifiedName) || currentFile == null) {
+            return null;
+        }
+
+        // 获取所有TableDef文件
+        Map<String, PsiClassOwner> tableDefMap = getDependenciesTableDef(currentFile);
+
+        // 直接通过全限定名查找
+        PsiClassOwner tableDefFile = tableDefMap.get(entityQualifiedName);
+        if (tableDefFile != null) {
+            return tableDefFile;
+        }
+
+        // 如果直接查找失败，尝试通过类名查找
+        String className = StrUtil.subAfter(entityQualifiedName, ".", true);
+        for (Map.Entry<String, PsiClassOwner> entry : tableDefMap.entrySet()) {
+            String key = entry.getKey();
+            if (key.endsWith("." + className) || key.endsWith(className)) {
+                return entry.getValue();
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * 根据实体类的全限定名获取TableDef类的全限定名
+     *
+     * @param entityQualifiedName 实体类的全限定名
+     * @param currentFile 当前文件
+     * @return TableDef类的全限定名，如果找不到则返回null
+     */
+    public static String getTableDefQualifiedName(String entityQualifiedName, VirtualFile currentFile) {
+        PsiClassOwner tableDefFile = findTableDefByEntityQualifiedName(entityQualifiedName, currentFile);
+        if (tableDefFile == null) {
+            return null;
+        }
+
+        // 获取配置
+        Module module = ModuleUtil.findModuleForFile(currentFile, ProjectUtils.getCurrentProject());
+        CustomConfig config = Modules.moduleConfig(module);
+
+        // 构建TableDef类名
+        String className = StrUtil.subAfter(entityQualifiedName, ".", true);
+        String tableDefClassName = getTableDefClassName(className, config);
+
+        return tableDefFile.getPackageName() + "." + tableDefClassName;
+    }
+
+    /**
+     * 根据实体类名生成TableDef类名
+     *
+     * @param entityClassName 实体类名
+     * @param config 配置
+     * @return TableDef类名
+     */
+    private static String getTableDefClassName(String entityClassName, CustomConfig config) {
+        // 处理实体类后缀过滤
+        String ignoreEntitySuffixes = config.getTableDefIgnoreEntitySuffixes();
+        if (StrUtil.isNotEmpty(ignoreEntitySuffixes)) {
+            String[] suffixes = ignoreEntitySuffixes.split(",");
+            for (String suffix : suffixes) {
+                suffix = suffix.trim();
+                if (entityClassName.endsWith(suffix)) {
+                    entityClassName = entityClassName.replace(suffix, "");
+                    break;
+                }
+            }
+        }
+
+        // 添加TableDef后缀
+        String tableDefSuffix = ObjectUtil.defaultIfNull(config.getTableDefClassSuffix(), "TableDef");
+        return entityClassName + tableDefSuffix;
+    }
 }
