@@ -1,29 +1,42 @@
 package club.bigtian.mf.plugin.core.contributor;
 
 import club.bigtian.mf.plugin.core.config.CustomConfig;
+import club.bigtian.mf.plugin.core.handler.ServiceMethodGenerationInsertHandler;
 import club.bigtian.mf.plugin.core.icons.Icons;
 import club.bigtian.mf.plugin.core.util.Modules;
+import club.bigtian.mf.plugin.core.util.ProjectUtils;
 import club.bigtian.mf.plugin.core.util.TableDefUtils;
 import club.bigtian.mf.plugin.core.util.VirtualFileUtils;
 import club.bigtian.mf.plugin.entity.AptInfo;
 import cn.hutool.core.util.StrUtil;
-import com.intellij.codeInsight.completion.CompletionContributor;
-import com.intellij.codeInsight.completion.CompletionParameters;
-import com.intellij.codeInsight.completion.CompletionResultSet;
+import com.intellij.codeInsight.completion.*;
+import com.intellij.lang.java.JavaLanguage;
 import com.intellij.codeInsight.lookup.LookupElement;
 import com.intellij.codeInsight.lookup.LookupElementBuilder;
+import com.intellij.icons.AllIcons;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.command.WriteCommandAction;
 import com.intellij.openapi.command.CommandProcessor;
 import java.util.Set;
 import java.util.HashSet;
+
+import com.intellij.openapi.command.WriteCommandAction;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleUtil;
+import com.intellij.openapi.progress.ProcessCanceledException;
+import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Computable;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.patterns.PlatformPatterns;
 import com.intellij.psi.*;
+import com.intellij.util.ProcessingContext;
+import com.intellij.psi.javadoc.PsiDocComment;
 import com.intellij.psi.search.GlobalSearchScope;
+import com.intellij.psi.util.PsiTreeUtil;
+import com.intellij.psi.PsiDocumentManager;
+import com.intellij.psi.search.searches.ClassInheritorsSearch;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.ArrayList;
@@ -38,6 +51,20 @@ import java.util.Map;
 public class ServiceCompletionContributor extends CompletionContributor {
 
     private static final String ISERVICE_CLASS = "com.mybatisflex.core.service.IService";
+
+    public ServiceCompletionContributor() {
+        // 注册在Java文件中的补全模式
+        extend(CompletionType.BASIC,
+               PlatformPatterns.psiElement().inFile(PlatformPatterns.psiFile(PsiJavaFile.class)),
+               new CompletionProvider<CompletionParameters>() {
+                   @Override
+                   protected void addCompletions(@NotNull CompletionParameters parameters,
+                                               @NotNull ProcessingContext context,
+                                               @NotNull CompletionResultSet result) {
+                       fillCompletionVariants(parameters, result);
+                   }
+               });
+    }
 
     @Override
     public void fillCompletionVariants(@NotNull CompletionParameters parameters, @NotNull CompletionResultSet result) {
@@ -60,6 +87,12 @@ public class ServiceCompletionContributor extends CompletionContributor {
 
             // 确保是Java文件
             if (!(psiFile instanceof PsiJavaFile)) {
+                return;
+            }
+
+            // 检查是否是方法调用补全（在其他类中调用Service方法）
+            if (isServiceMethodCallCompletion(position, parameters)) {
+                handleServiceMethodCallCompletion(position, parameters, result, project);
                 return;
             }
 
@@ -101,6 +134,224 @@ public class ServiceCompletionContributor extends CompletionContributor {
 
         } catch (Exception e) {
             e.printStackTrace();
+        }
+    }
+
+    /**
+     * 检查是否是Service方法调用补全
+     */
+    private boolean isServiceMethodCallCompletion(PsiElement position, CompletionParameters parameters) {
+        // 检查是否在方法调用表达式中（已完成的调用）
+        PsiElement parent = position.getParent();
+        while (parent != null) {
+            if (parent instanceof PsiMethodCallExpression) {
+                PsiMethodCallExpression methodCall = (PsiMethodCallExpression) parent;
+                PsiExpression qualifierExpression = methodCall.getMethodExpression().getQualifierExpression();
+                if (qualifierExpression != null) {
+                    PsiType type = qualifierExpression.getType();
+                    if (type != null) {
+                        String typeName = type.getCanonicalText();
+                        // 检查是否是Service接口调用
+                        return isServiceType(typeName, position.getProject());
+                    }
+                }
+            }
+            parent = parent.getParent();
+        }
+        // 检查是否在正在输入的方法调用中（如 service.listBy）
+        return isInProgressServiceMethodCall(position, parameters);
+    }
+
+    /**
+     * 检查是否在正在输入的Service方法调用中
+     */
+    private boolean isInProgressServiceMethodCall(PsiElement position, CompletionParameters parameters) {
+        try {
+            // 检查是否在引用表达式中（如 service.methodName）
+            PsiElement parent = position.getParent();
+            if (parent instanceof PsiReferenceExpression) {
+                PsiReferenceExpression refExpr = (PsiReferenceExpression) parent;
+                PsiExpression qualifierExpression = refExpr.getQualifierExpression();
+                if (qualifierExpression != null) {
+                    PsiType type = qualifierExpression.getType();
+                    if (type != null) {
+                        String typeName = type.getCanonicalText();
+                        // 检查是否是Service接口调用
+                        return isServiceType(typeName, position.getProject());
+                    }
+                }
+            }
+
+            // 检查父级是否是引用表达式
+            if (parent != null && parent.getParent() instanceof PsiReferenceExpression) {
+                PsiReferenceExpression refExpr = (PsiReferenceExpression) parent.getParent();
+                PsiExpression qualifierExpression = refExpr.getQualifierExpression();
+                if (qualifierExpression != null) {
+                    PsiType type = qualifierExpression.getType();
+                    if (type != null) {
+                        String typeName = type.getCanonicalText();
+                        // 检查是否是Service接口调用
+                        return isServiceType(typeName, position.getProject());
+                    }
+                }
+            }
+
+            // 额外检查：通过文本分析来检测Service调用
+            String text = parameters.getEditor().getDocument().getText();
+            int offset = parameters.getOffset();
+            if (offset > 10) {
+                String beforeCursor = text.substring(Math.max(0, offset - 50), offset);
+                // 检查是否包含Service调用模式
+                if (beforeCursor.matches(".*\\w+Service\\s*\\.\\s*\\w*$")) {
+                    return true;
+                }
+            }
+
+        } catch (Exception e) {
+            // 忽略异常
+        }
+        return false;
+    }
+
+    /**
+     * 检查是否是Service类型
+     */
+    private boolean isServiceType(String typeName, Project project) {
+        try {
+            // 首先通过命名约定快速检查
+            if (typeName != null && typeName.contains("Service")) {
+                JavaPsiFacade psiFacade = JavaPsiFacade.getInstance(project);
+                PsiClass psiClass = psiFacade.findClass(typeName, GlobalSearchScope.allScope(project));
+                if (psiClass != null && psiClass.isInterface()) {
+                    // 检查是否继承自IService
+                    PsiClassType[] extendsTypes = psiClass.getExtendsListTypes();
+                    for (PsiClassType extendsType : extendsTypes) {
+                        String extendsTypeName = extendsType.getCanonicalText();
+                        if (extendsTypeName != null && extendsTypeName.contains("IService")) {
+                            return true;
+                        }
+                    }
+
+                    // 如果没有找到IService继承，但类名包含Service，也认为是Service类型
+                    return true;
+                }
+            }
+        } catch (Exception e) {
+            // 忽略异常
+        }
+        return false;
+    }
+
+    /**
+     * 处理Service方法调用补全
+     */
+    private void handleServiceMethodCallCompletion(PsiElement position, CompletionParameters parameters,
+                                                 CompletionResultSet result, Project project) {
+        try {
+            // 尝试获取Service接口和实体类型
+            ServiceCallInfo serviceCallInfo = getServiceCallInfo(position, project);
+            if (serviceCallInfo == null) {
+                return;
+            }
+
+            // 获取输入前缀
+            String prefix = result.getPrefixMatcher().getPrefix();
+            if (isMethodNameCompletion(prefix)) {
+                // 生成Service方法补全，包括自动生成方法的选项
+                addServiceMethodCallCompletion(result, serviceCallInfo.serviceInterface, serviceCallInfo.entityQualifiedName, project, prefix, parameters);
+            }
+
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    /**
+     * 获取Service调用信息
+     */
+    private ServiceCallInfo getServiceCallInfo(PsiElement position, Project project) {
+        try {
+            // 首先尝试从方法调用表达式获取
+            PsiElement parent = position.getParent();
+            while (parent != null && !(parent instanceof PsiMethodCallExpression)) {
+                parent = parent.getParent();
+            }
+
+            if (parent instanceof PsiMethodCallExpression) {
+                PsiMethodCallExpression methodCall = (PsiMethodCallExpression) parent;
+                PsiExpression qualifierExpression = methodCall.getMethodExpression().getQualifierExpression();
+                if (qualifierExpression != null) {
+                    PsiType qualifierType = qualifierExpression.getType();
+                    if (qualifierType != null) {
+                        return createServiceCallInfo(qualifierType.getCanonicalText(), project);
+                    }
+                }
+            }
+
+            // 如果没有找到方法调用表达式，尝试从引用表达式获取
+            parent = position.getParent();
+            if (parent instanceof PsiReferenceExpression) {
+                PsiReferenceExpression refExpr = (PsiReferenceExpression) parent;
+                PsiExpression qualifierExpression = refExpr.getQualifierExpression();
+                if (qualifierExpression != null) {
+                    PsiType qualifierType = qualifierExpression.getType();
+                    if (qualifierType != null) {
+                        return createServiceCallInfo(qualifierType.getCanonicalText(), project);
+                    }
+                }
+            }
+
+            // 检查父级是否是引用表达式
+            if (parent != null && parent.getParent() instanceof PsiReferenceExpression) {
+                PsiReferenceExpression refExpr = (PsiReferenceExpression) parent.getParent();
+                PsiExpression qualifierExpression = refExpr.getQualifierExpression();
+                if (qualifierExpression != null) {
+                    PsiType qualifierType = qualifierExpression.getType();
+                    if (qualifierType != null) {
+                        return createServiceCallInfo(qualifierType.getCanonicalText(), project);
+                    }
+                }
+            }
+
+        } catch (Exception e) {
+            // 忽略异常
+        }
+        return null;
+    }
+
+    /**
+     * 创建Service调用信息
+     */
+    private ServiceCallInfo createServiceCallInfo(String typeName, Project project) {
+        try {
+            JavaPsiFacade psiFacade = JavaPsiFacade.getInstance(project);
+            PsiClass serviceInterface = psiFacade.findClass(typeName, GlobalSearchScope.allScope(project));
+            if (serviceInterface == null || !serviceInterface.isInterface()) {
+                return null;
+            }
+
+            // 获取实体类型
+            String entityQualifiedName = getEntityClassFromInterface(serviceInterface, project);
+            if (entityQualifiedName == null) {
+                return null;
+            }
+
+            return new ServiceCallInfo(serviceInterface, entityQualifiedName);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
+     * Service调用信息
+     */
+    private static class ServiceCallInfo {
+        final PsiClass serviceInterface;
+        final String entityQualifiedName;
+
+        ServiceCallInfo(PsiClass serviceInterface, String entityQualifiedName) {
+            this.serviceInterface = serviceInterface;
+            this.entityQualifiedName = entityQualifiedName;
         }
     }
 
@@ -211,7 +462,7 @@ public class ServiceCompletionContributor extends CompletionContributor {
             String fieldsPart = prefix.substring(methodPrefix.length());
 
             // 生成可能的方法补全
-            generateMethodCompletions(result, methodPrefix, fieldsPart, entityFields, fieldToTableDefMapping, entityQualifiedName, currentServiceClass);
+            generateMethodCompletions(result, methodPrefix, fieldsPart, entityFields, fieldToTableDefMapping, entityQualifiedName, currentServiceClass, project);
 
         } catch (Exception e) {
             e.printStackTrace();
@@ -257,26 +508,9 @@ public class ServiceCompletionContributor extends CompletionContributor {
 
                 // 添加整个实体的方法补全（如listBy + 实体名）
                 if (queryPrefix.equals("listBy") || queryPrefix.equals("findBy")) {
-                    String entityMethodName = queryPrefix + simpleEntityName;
-                    if (currentServiceClass == null || !methodExists(currentServiceClass, entityMethodName)) {
-                        String entityMethodSignature = entityMethodName + "()";
-                        String entityMethodBody = generateEntityMethodBody(queryPrefix, entityFields, fieldToTableDefMapping, simpleEntityName, entityClass);
-                        String returnType = getReturnTypeForMethodPrefix(queryPrefix, simpleEntityName);
-
-                        LookupElement entityMethodElement = LookupElementBuilder.create(entityMethodSignature)
-                                .withPresentableText(entityMethodSignature)
-                                .withTypeText(returnType)
-                                .withTailText(" { " + entityMethodBody + " }", true)
-                                .withIcon(Icons.FLEX)
-                                .withInsertHandler((context, item) -> {
-                                    // 为整个实体方法创建特殊的字段映射
-                                    Map<String, FieldInfo> entityMethodFields = new HashMap<>();
-                                    entityMethodFields.put("entity", new FieldInfo("entity", simpleEntityName, "entity"));
-                                    insertMethodImplementationWithCursor(context, entityMethodName, entityMethodBody, returnType, "Entity", entityMethodFields, entityQualifiedName, fieldToTableDefMapping);
-                                });
-
-                        result.addElement(entityMethodElement);
-                    }
+                    // 生成两个版本：eq查询和like查询
+                    generateEntityMethods(result, queryPrefix, simpleEntityName, entityFields, fieldToTableDefMapping,
+                                        entityQualifiedName, entityClass, currentServiceClass);
                 }
 
                 // 为每个字段生成方法补全
@@ -347,6 +581,19 @@ public class ServiceCompletionContributor extends CompletionContributor {
     }
 
     /**
+     * 字段查询信息类
+     */
+    private static class FieldQueryInfo {
+        String fieldName;      // 字段名
+        String queryType;      // 查询类型：eq, like, gt, lt 等
+
+        FieldQueryInfo(String fieldName, String queryType) {
+            this.fieldName = fieldName;
+            this.queryType = queryType;
+        }
+    }
+
+    /**
      * 获取实体类字段信息
      */
     private Map<String, FieldInfo> getEntityFieldsInfo(PsiClass entityClass) {
@@ -395,7 +642,7 @@ public class ServiceCompletionContributor extends CompletionContributor {
      */
     private void generateMethodCompletions(CompletionResultSet result, String methodPrefix, String fieldsPart,
                                          Map<String, FieldInfo> entityFields, Map<String, String> fieldToTableDefMapping,
-                                         String entityQualifiedName, PsiClass currentServiceClass) {
+                                         String entityQualifiedName, PsiClass currentServiceClass, Project project) {
 
         String simpleEntityName = StrUtil.subAfter(entityQualifiedName, ".", true);
 
@@ -406,7 +653,7 @@ public class ServiceCompletionContributor extends CompletionContributor {
         }
 
         // 解析已输入的字段部分
-        List<String> possibleCompletions = parseFieldsAndGenerateCompletions(fieldsPart, entityFields, fieldToTableDefMapping);
+        List<String> possibleCompletions = parseFieldsAndGenerateCompletions(fieldsPart, entityFields, fieldToTableDefMapping, project);
 
         for (String completion : possibleCompletions) {
             String fullMethodName = methodPrefix + completion;
@@ -418,7 +665,7 @@ public class ServiceCompletionContributor extends CompletionContributor {
 
             // 生成空的方法签名，不包含参数
             String methodSignature = fullMethodName + "()";
-            String methodBody = generateMethodBody(methodPrefix, completion, fieldToTableDefMapping, simpleEntityName);
+            String methodBody = generateMethodBody(methodPrefix, completion, fieldToTableDefMapping, simpleEntityName, project);
             String returnType = getReturnTypeForMethodPrefix(methodPrefix, simpleEntityName);
 
             LookupElement methodElement = LookupElementBuilder.create(methodSignature)
@@ -436,11 +683,89 @@ public class ServiceCompletionContributor extends CompletionContributor {
     }
 
     /**
+     * 生成实体方法（eq和like两个版本）
+     */
+    private void generateEntityMethods(CompletionResultSet result, String queryPrefix, String simpleEntityName,
+                                     Map<String, FieldInfo> entityFields, Map<String, String> fieldToTableDefMapping,
+                                     String entityQualifiedName, PsiClass entityClass, PsiClass currentServiceClass) {
+
+        // 判断当前是否在接口中
+        boolean isInterface = currentServiceClass != null && currentServiceClass.isInterface();
+
+        // 生成eq版本的实体方法
+        String entityMethodName = queryPrefix + simpleEntityName;
+        if (currentServiceClass == null || !methodExists(currentServiceClass, entityMethodName)) {
+            String entityMethodSignature = entityMethodName + "()";
+            String returnType = getReturnTypeForMethodPrefix(queryPrefix, simpleEntityName);
+
+            LookupElementBuilder builder = LookupElementBuilder.create(entityMethodSignature)
+                    .withPresentableText(entityMethodSignature)
+                    .withTypeText(returnType)
+                    .withIcon(Icons.FLEX);
+
+            if (isInterface) {
+                // 在接口中，只显示方法签名
+                builder = builder.withTailText(" (generate method declaration)", true)
+                        .withInsertHandler((context, item) -> {
+                            insertInterfaceMethodDeclaration(context, entityMethodName, returnType);
+                        });
+            } else {
+                // 在实现类中，显示方法体
+                String entityMethodBody = generateEntityMethodBody(queryPrefix, entityFields, fieldToTableDefMapping, simpleEntityName, entityClass, "eq");
+                builder = builder.withTailText(" { " + entityMethodBody + " }", true)
+                        .withInsertHandler((context, item) -> {
+                            // 为整个实体方法创建特殊的字段映射
+                            Map<String, FieldInfo> entityMethodFields = new HashMap<>();
+                            entityMethodFields.put("entity", new FieldInfo("entity", simpleEntityName, "entity"));
+                            insertMethodImplementationWithCursor(context, entityMethodName, entityMethodBody, returnType, "Entity", entityMethodFields, entityQualifiedName, fieldToTableDefMapping);
+                        });
+            }
+
+            result.addElement(builder);
+        }
+
+        // 生成like版本的实体方法
+        String entityMethodNameLike = queryPrefix + simpleEntityName + "Like";
+        if (currentServiceClass == null || !methodExists(currentServiceClass, entityMethodNameLike)) {
+            String entityMethodSignatureLike = entityMethodNameLike + "()";
+            String returnType = getReturnTypeForMethodPrefix(queryPrefix, simpleEntityName);
+
+            LookupElementBuilder builderLike = LookupElementBuilder.create(entityMethodSignatureLike)
+                    .withPresentableText(entityMethodSignatureLike)
+                    .withTypeText(returnType)
+                    .withIcon(Icons.FLEX);
+
+            if (isInterface) {
+                // 在接口中，只显示方法签名
+                builderLike = builderLike.withTailText(" (generate method declaration)", true)
+                        .withInsertHandler((context, item) -> {
+                            insertInterfaceMethodDeclaration(context, entityMethodNameLike, returnType);
+                        });
+            } else {
+                // 在实现类中，显示方法体
+                String entityMethodBodyLike = generateEntityMethodBody(queryPrefix, entityFields, fieldToTableDefMapping, simpleEntityName, entityClass, "like");
+                builderLike = builderLike.withTailText(" { " + entityMethodBodyLike + " }", true)
+                        .withInsertHandler((context, item) -> {
+                            // 为整个实体方法创建特殊的字段映射
+                            Map<String, FieldInfo> entityMethodFields = new HashMap<>();
+                            entityMethodFields.put("entity", new FieldInfo("entity", simpleEntityName, "entity"));
+                            insertMethodImplementationWithCursor(context, entityMethodNameLike, entityMethodBodyLike, returnType, "EntityLike", entityMethodFields, entityQualifiedName, fieldToTableDefMapping);
+                        });
+            }
+
+            result.addElement(builderLike);
+        }
+    }
+
+    /**
      * 生成单字段方法
      */
     private void generateSingleFieldMethods(CompletionResultSet result, String methodPrefix,
                                           Map<String, FieldInfo> entityFields, Map<String, String> fieldToTableDefMapping,
                                           String simpleEntityName, PsiClass currentServiceClass, String entityQualifiedName) {
+
+        // 判断当前是否在接口中
+        boolean isInterface = currentServiceClass != null && currentServiceClass.isInterface();
 
         for (FieldInfo fieldInfo : entityFields.values()) {
             String capitalizedFieldName = StrUtil.upperFirst(fieldInfo.fieldName);
@@ -452,23 +777,407 @@ public class ServiceCompletionContributor extends CompletionContributor {
             }
 
             String methodSignature = methodName + "()";
-            String methodBody = generateSingleFieldMethodBody(methodPrefix, fieldInfo, fieldToTableDefMapping, simpleEntityName);
             String returnType = getReturnTypeForMethodPrefix(methodPrefix, simpleEntityName);
 
-            // 创建单字段的字段信息映射
-            Map<String, FieldInfo> singleFieldMap = new HashMap<>();
-            singleFieldMap.put(fieldInfo.fieldName, fieldInfo);
-
-            LookupElement methodElement = LookupElementBuilder.create(methodSignature)
+            LookupElementBuilder builder = LookupElementBuilder.create(methodSignature)
                     .withPresentableText(methodSignature)
                     .withTypeText(returnType)
-                    .withTailText(" { " + methodBody + " }", true)
-                    .withIcon(Icons.FLEX)
-                    .withInsertHandler((context, item) -> {
-                        insertMethodImplementationWithCursor(context, methodName, methodBody, returnType, capitalizedFieldName, singleFieldMap, entityQualifiedName, fieldToTableDefMapping);
-                    });
+                    .withIcon(Icons.FLEX);
 
-            result.addElement(methodElement);
+            if (isInterface) {
+                // 在接口中，只显示方法签名，不显示方法体
+                builder = builder.withTailText(" (generate method declaration)", true)
+                        .withInsertHandler((context, item) -> {
+                            insertInterfaceMethodDeclaration(context, methodName, returnType);
+                        });
+            } else {
+                // 在实现类中，显示方法体
+                String methodBody = generateSingleFieldMethodBody(methodPrefix, fieldInfo, fieldToTableDefMapping, simpleEntityName);
+                Map<String, FieldInfo> singleFieldMap = new HashMap<>();
+                singleFieldMap.put(fieldInfo.fieldName, fieldInfo);
+
+                builder = builder.withTailText(" { " + methodBody + " }", true)
+                        .withInsertHandler((context, item) -> {
+                            insertMethodImplementationWithCursor(context, methodName, methodBody, returnType, capitalizedFieldName, singleFieldMap, entityQualifiedName, fieldToTableDefMapping);
+                        });
+            }
+
+            result.addElement(builder);
+        }
+    }
+
+    /**
+     * 在接口中插入方法声明，并在实现类中生成方法实现
+     */
+    private void insertInterfaceMethodDeclaration(InsertionContext context, String methodName, String returnType) {
+        ApplicationManager.getApplication().executeOnPooledThread(() -> {
+            try {
+                Project project = context.getProject();
+
+                // 使用ReadAction确保在读取线程中执行PSI操作
+                ApplicationManager.getApplication().runReadAction(() -> {
+                    try {
+                        PsiElement element = context.getFile().findElementAt(context.getStartOffset());
+                        PsiClass psiClass = PsiTreeUtil.getParentOfType(element, PsiClass.class);
+
+                        if (psiClass != null && psiClass.isInterface()) {
+                            // 在写入线程中执行修改操作
+                            WriteCommandAction.runWriteCommandAction(project, () -> {
+                                try {
+                                    PsiElementFactory factory = JavaPsiFacade.getElementFactory(project);
+
+                                    // 解析方法名生成参数
+                                    String parameters = generateMethodParametersFromName(methodName);
+
+                                    // 生成接口方法声明
+                                    String methodText = "/**\n     * " + generateMethodDescription(methodName) + "\n     */\n    " +
+                                                      returnType + " " + methodName + "(" + parameters + ");";
+
+                                    PsiMethod method = factory.createMethodFromText(methodText, psiClass);
+
+                                    // 在接口中插入方法声明
+                                    psiClass.add(method);
+
+                                    // 同时在实现类中生成方法实现
+                                    generateImplementationMethodSafely(project, psiClass, methodName, returnType, parameters);
+
+                                } catch (Exception e) {
+                                    // 静默处理异常，避免影响用户体验
+                                }
+                            });
+                        }
+                    } catch (Exception e) {
+                        // 静默处理异常
+                    }
+                });
+
+                // 在EDT线程中清除已插入的文本
+                ApplicationManager.getApplication().invokeLater(() -> {
+                    try {
+                        context.getDocument().deleteString(context.getStartOffset(), context.getTailOffset());
+                    } catch (Exception e) {
+                        // 静默处理异常
+                    }
+                });
+
+            } catch (Exception e) {
+                // 静默处理异常
+            }
+        });
+    }
+
+
+    /**
+     * 从方法名生成参数列表
+     */
+    private String generateMethodParametersFromName(String methodName) {
+        try {
+            // 提取方法前缀
+            String methodPrefix = extractMethodPrefixFromMethodName(methodName);
+            String fieldsPart = methodName.substring(methodPrefix.length());
+
+            if (StrUtil.isEmpty(fieldsPart)) {
+                return "";
+            }
+
+            // 解析字段名
+            List<String> fieldNames = parseFieldNamesFromMethodName(fieldsPart);
+
+            if (fieldNames.isEmpty()) {
+                return "";
+            }
+
+            // 生成参数列表
+            List<String> parameters = new ArrayList<>();
+            for (String fieldName : fieldNames) {
+                String paramType = getParameterTypeFromFieldName(fieldName);
+                String paramName = StrUtil.lowerFirst(fieldName);
+                parameters.add(paramType + " " + paramName);
+            }
+
+            return String.join(", ", parameters);
+
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    /**
+     * 解析字段名列表
+     */
+    private List<String> parseFieldNamesFromMethodName(String fieldsPart) {
+        List<String> fieldNames = new ArrayList<>();
+
+        // 简单的解析逻辑：按And/Or分割
+        String[] parts = fieldsPart.split("(?=And|Or)");
+
+        for (String part : parts) {
+            // 移除And/Or前缀
+            String fieldPart = part;
+            if (fieldPart.startsWith("And")) {
+                fieldPart = fieldPart.substring(3);
+            } else if (fieldPart.startsWith("Or")) {
+                fieldPart = fieldPart.substring(2);
+            }
+
+            // 移除查询类型后缀（如Like, Gt, Lt等）
+            String fieldName = removeQueryTypeSuffix(fieldPart);
+            if (StrUtil.isNotEmpty(fieldName)) {
+                fieldNames.add(fieldName);
+            }
+        }
+
+        return fieldNames;
+    }
+
+    /**
+     * 移除查询类型后缀
+     */
+    private String removeQueryTypeSuffix(String fieldPart) {
+        // 常见的查询类型后缀
+        String[] suffixes = {"Like", "Gt", "Lt", "Ge", "Le", "Ne", "In", "NotIn", "Between", "NotBetween", "IsNull", "IsNotNull"};
+
+        for (String suffix : suffixes) {
+            if (fieldPart.endsWith(suffix)) {
+                return fieldPart.substring(0, fieldPart.length() - suffix.length());
+            }
+        }
+
+        return fieldPart;
+    }
+
+    /**
+     * 根据字段名获取参数类型
+     */
+    private String getParameterTypeFromFieldName(String fieldName) {
+        String lowerFieldName = fieldName.toLowerCase();
+
+        if (lowerFieldName.contains("id")) {
+            return "Long";
+        } else if (lowerFieldName.contains("time") || lowerFieldName.contains("date")) {
+            return "Date";
+        } else if (lowerFieldName.contains("count") || lowerFieldName.contains("num")) {
+            return "Integer";
+        } else if (lowerFieldName.contains("amount") || lowerFieldName.contains("price")) {
+            return "BigDecimal";
+        } else if (lowerFieldName.contains("flag") || lowerFieldName.contains("enable")) {
+            return "Boolean";
+        } else {
+            return "String"; // 默认为String类型
+        }
+    }
+
+    /**
+     * 安全地在实现类中生成方法实现
+     */
+    private void generateImplementationMethodSafely(Project project, PsiClass serviceInterface, String methodName, String returnType, String parameters) {
+        try {
+            // 在后台线程中执行，避免阻塞UI
+            ApplicationManager.getApplication().executeOnPooledThread(() -> {
+                ApplicationManager.getApplication().runReadAction(() -> {
+                    try {
+                        generateImplementationMethod(project, serviceInterface, methodName, returnType, parameters);
+                    } catch (Exception e) {
+                        // 静默处理异常
+                    }
+                });
+            });
+        } catch (Exception e) {
+            // 静默处理异常
+        }
+    }
+
+    /**
+     * 在实现类中生成方法实现
+     */
+    private void generateImplementationMethod(Project project, PsiClass serviceInterface, String methodName, String returnType, String parameters) {
+        try {
+            // 查找实现类
+            PsiClass serviceImpl = findServiceImplementation(serviceInterface, project);
+            if (serviceImpl == null) {
+                return;
+            }
+
+            // 获取实体类型
+            String entityQualifiedName = getEntityClassFromInterface(serviceInterface, project);
+            if (entityQualifiedName == null) {
+                return;
+            }
+
+            // 生成方法实现
+            String methodPrefix = extractMethodPrefixFromMethodName(methodName);
+            String methodBody = generateMethodBodyFromName(methodName, methodPrefix, entityQualifiedName);
+
+            PsiElementFactory factory = JavaPsiFacade.getElementFactory(project);
+
+            // 生成完整的方法实现
+            String methodText = "/**\n     * " + generateMethodDescription(methodName) + "\n     */\n" +
+                              "    @Override\n" +
+                              "    public " + returnType + " " + methodName + "(" + parameters + ") {\n" +
+                              methodBody + "\n" +
+                              "    }";
+
+            PsiMethod method = factory.createMethodFromText(methodText, serviceImpl);
+
+            // 在实现类中插入方法
+            WriteCommandAction.runWriteCommandAction(project, () -> {
+                serviceImpl.add(method);
+            });
+
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    /**
+     * 查找Service实现类 - 使用IDEA原生API
+     */
+    private PsiClass findServiceImplementation(PsiClass serviceInterface, Project project) {
+        try {
+            // 检查进度是否被取消
+            ProgressManager.checkCanceled();
+
+            if (serviceInterface == null || !serviceInterface.isInterface()) {
+                System.err.println("Service interface is null or not an interface");
+                return null;
+            }
+
+            System.out.println("Searching for implementation of: " + serviceInterface.getQualifiedName());
+
+            // 使用IDEA原生API查找接口的所有实现类
+            GlobalSearchScope scope = GlobalSearchScope.allScope(project);
+
+            // 查找直接实现该接口的类
+            for (PsiClass implementor : ClassInheritorsSearch.search(serviceInterface, scope, false)) {
+                // 检查进度是否被取消
+                ProgressManager.checkCanceled();
+
+                System.out.println("Found implementor: " + implementor.getQualifiedName() +
+                                 ", isInterface: " + implementor.isInterface() +
+                                 ", isAbstract: " + implementor.hasModifierProperty(PsiModifier.ABSTRACT));
+
+                // 跳过接口，只要具体的实现类
+                if (!implementor.isInterface() && !implementor.hasModifierProperty(PsiModifier.ABSTRACT)) {
+                    System.out.println("Selected implementation: " + implementor.getQualifiedName());
+                    return implementor;
+                }
+            }
+
+            System.err.println("No implementation found for: " + serviceInterface.getQualifiedName());
+            return null;
+        } catch (ProcessCanceledException e) {
+            // 进度被取消，直接返回null
+            System.err.println("Search cancelled for: " + serviceInterface.getQualifiedName());
+            return null;
+        } catch (Exception e) {
+            // 其他异常，返回null
+            System.err.println("Error searching for implementation: " + e.getMessage());
+            e.printStackTrace();
+            return null;
+        }
+    }
+
+    /**
+     * 根据方法名生成方法体
+     */
+    private String generateMethodBodyFromName(String methodName, String methodPrefix, String entityQualifiedName) {
+        try {
+            String simpleEntityName = StrUtil.subAfter(entityQualifiedName, ".", true);
+            String tableDefInstanceName = StrUtil.toUnderlineCase(simpleEntityName).toUpperCase();
+
+            // 解析字段部分
+            String fieldsPart = methodName.substring(methodPrefix.length());
+
+            StringBuilder methodBody = new StringBuilder();
+            methodBody.append("        QueryWrapper queryWrapper = QueryWrapper.create()");
+
+            // 简单解析第一个字段（可以后续优化为更复杂的解析）
+            if (StrUtil.isNotEmpty(fieldsPart)) {
+                String firstField = extractFirstField(fieldsPart);
+                String tableDefField = StrUtil.toUnderlineCase(firstField).toUpperCase();
+                String paramName = StrUtil.lowerFirst(firstField);
+
+                methodBody.append("\n                .where(").append(tableDefInstanceName).append(".").append(tableDefField).append(".eq(").append(paramName).append("));");
+            } else {
+                methodBody.append(";");
+            }
+
+            methodBody.append("\n        ").append(generateReturnStatementFromPrefix(methodPrefix, "queryWrapper"));
+
+            return methodBody.toString();
+
+        } catch (Exception e) {
+            return "        // TODO: 实现查询逻辑\n        return null;";
+        }
+    }
+
+    /**
+     * 提取第一个字段名
+     */
+    private String extractFirstField(String fieldsPart) {
+        // 移除查询类型后缀
+        String[] suffixes = {"Like", "Gt", "Lt", "Ge", "Le", "Ne", "In", "NotIn", "Between", "NotBetween", "IsNull", "IsNotNull"};
+        String fieldName = fieldsPart;
+
+        for (String suffix : suffixes) {
+            if (fieldName.endsWith(suffix)) {
+                fieldName = fieldName.substring(0, fieldName.length() - suffix.length());
+                break;
+            }
+        }
+
+        // 如果包含And/Or，只取第一部分
+        if (fieldName.contains("And")) {
+            fieldName = fieldName.substring(0, fieldName.indexOf("And"));
+        } else if (fieldName.contains("Or")) {
+            fieldName = fieldName.substring(0, fieldName.indexOf("Or"));
+        }
+
+        return fieldName;
+    }
+
+    /**
+     * 根据方法前缀生成返回语句
+     */
+    private String generateReturnStatementFromPrefix(String methodPrefix, String queryWrapper) {
+        String lowerMethodPrefix = methodPrefix.toLowerCase();
+        switch (lowerMethodPrefix) {
+            case "listby":
+            case "findby":
+                return "return list(" + queryWrapper + ");";
+            case "getby":
+                return "return getOne(" + queryWrapper + ");";
+            case "countby":
+                return "return count(" + queryWrapper + ");";
+            case "existsby":
+                return "return count(" + queryWrapper + ") > 0;";
+            case "removeby":
+            case "deleteby":
+                return "return remove(" + queryWrapper + ");";
+            default:
+                return "return list(" + queryWrapper + ");";
+        }
+    }
+
+    /**
+     * 生成方法描述
+     */
+    private String generateMethodDescription(String methodName) {
+        String lowerMethodName = methodName.toLowerCase();
+        if (lowerMethodName.startsWith("listby")) {
+            return "根据条件查询列表";
+        } else if (lowerMethodName.startsWith("findby")) {
+            return "根据条件查找数据";
+        } else if (lowerMethodName.startsWith("getby")) {
+            return "根据条件获取单个数据";
+        } else if (lowerMethodName.startsWith("countby")) {
+            return "根据条件统计数量";
+        } else if (lowerMethodName.startsWith("existsby")) {
+            return "根据条件检查是否存在";
+        } else if (lowerMethodName.startsWith("removeby") || lowerMethodName.startsWith("deleteby")) {
+            return "根据条件删除数据";
+        } else {
+            return "根据条件查询数据";
         }
     }
 
@@ -476,25 +1185,36 @@ public class ServiceCompletionContributor extends CompletionContributor {
      * 解析字段并生成补全
      */
     private List<String> parseFieldsAndGenerateCompletions(String fieldsPart, Map<String, FieldInfo> entityFields,
-                                                          Map<String, String> fieldToTableDefMapping) {
+                                                          Map<String, String> fieldToTableDefMapping, Project project) {
         List<String> completions = new ArrayList<>();
 
         // 获取已使用的字段列表，避免重复
         Set<String> usedFields = getUsedFieldsFromInput(fieldsPart);
 
-        // 检查是否以单个字母结尾，可能是要输入And/Or
+        // 获取QueryColumn方法映射
+        Map<String, String> queryMethods = getQueryColumnMethods(project);
+
+        // 检查是否以QueryColumn方法结尾，如果是，则可以直接作为完整方法名
+        if (endsWithQueryColumnMethod(fieldsPart, entityFields, project)) {
+            // 方法名已经完整，但仍然可以继续添加And/Or连接符
+            // 检查是否可以添加And/Or
+            addAndOrCompletions(completions, fieldsPart, entityFields, usedFields, queryMethods);
+            return completions;
+        }
+
+        // 检查是否以单个字母结尾，可能是要输入And/Or或QueryColumn方法
         if (fieldsPart.length() > 0) {
             char lastChar = fieldsPart.charAt(fieldsPart.length() - 1);
             if (lastChar == 'a' || lastChar == 'A') {
                 // 检查前面是否是完整的字段名
                 String prefix = fieldsPart.substring(0, fieldsPart.length() - 1);
-                if (endsWithValidField(prefix, entityFields)) {
+                if (endsWithValidField(prefix, entityFields, project)) {
                     completions.add(prefix + "And");
                     return completions; // 只返回And选项，保持连贯性
                 }
             } else if (lastChar == 'o' || lastChar == 'O') {
                 String prefix = fieldsPart.substring(0, fieldsPart.length() - 1);
-                if (endsWithValidField(prefix, entityFields)) {
+                if (endsWithValidField(prefix, entityFields, project)) {
                     completions.add(prefix + "Or");
                     return completions; // 只返回Or选项，保持连贯性
                 }
@@ -517,12 +1237,53 @@ public class ServiceCompletionContributor extends CompletionContributor {
         for (String fieldName : entityFields.keySet()) {
             String capitalizedFieldName = StrUtil.upperFirst(fieldName);
 
-            // 检查是否匹配当前输入
+            // 1. 检查字段名是否匹配当前输入（部分匹配或完全匹配）
             if (capitalizedFieldName.startsWith(fieldsPart)) {
                 // 避免重复字段
                 if (!usedFields.contains(fieldName)) {
-                    // 单字段
-                    completions.add(capitalizedFieldName);
+                    // 如果是完全匹配，提供扩展选项
+                    if (capitalizedFieldName.equals(fieldsPart)) {
+                        // 单字段（默认eq查询）
+                        completions.add(capitalizedFieldName);
+
+                        // 动态添加查询类型后缀的选项
+                        for (String suffix : queryMethods.keySet()) {
+                            completions.add(capitalizedFieldName + suffix);
+                        }
+
+                        // 添加And/Or连接符选项
+                        completions.add(capitalizedFieldName + "And");
+                        completions.add(capitalizedFieldName + "Or");
+                    } else {
+                        // 部分匹配，只添加字段名本身
+                        completions.add(capitalizedFieldName);
+                    }
+                }
+            }
+
+            // 2. 检查字段名+QueryColumn方法的组合是否匹配输入
+            for (String suffix : queryMethods.keySet()) {
+                String fieldWithSuffix = capitalizedFieldName + suffix;
+                // 只有当组合完全匹配用户输入的前缀时才添加
+                if (fieldWithSuffix.startsWith(fieldsPart) && !fieldWithSuffix.equals(fieldsPart)) {
+                    // 避免重复字段
+                    if (!usedFields.contains(fieldName)) {
+                        completions.add(fieldWithSuffix);
+                    }
+                }
+            }
+
+            // 3. 检查是否是部分QueryColumn方法名的匹配（如输入"TitleL"想要"TitleLike"）
+            if (fieldsPart.length() > capitalizedFieldName.length() &&
+                fieldsPart.startsWith(capitalizedFieldName)) {
+                String remainingSuffix = fieldsPart.substring(capitalizedFieldName.length());
+                for (String suffix : queryMethods.keySet()) {
+                    if (suffix.startsWith(remainingSuffix) && !suffix.equals(remainingSuffix)) {
+                        // 避免重复字段
+                        if (!usedFields.contains(fieldName)) {
+                            completions.add(capitalizedFieldName + suffix);
+                        }
+                    }
                 }
             }
 
@@ -536,11 +1297,43 @@ public class ServiceCompletionContributor extends CompletionContributor {
                         String remainingPart = lastPart.substring(connector.length());
 
                         if (capitalizedFieldName.startsWith(remainingPart)) {
-                            // 避免重复字段
-                            if (!usedFields.contains(fieldName)) {
-                                String prefix = fieldsPart.substring(0, fieldsPart.length() - remainingPart.length());
-                                String completion = prefix + capitalizedFieldName;
+                            String prefix = fieldsPart.substring(0, fieldsPart.length() - remainingPart.length());
+                            String completion = prefix + capitalizedFieldName;
+
+                            // 如果是完全匹配，总是显示选项
+                            if (capitalizedFieldName.equals(remainingPart)) {
                                 completions.add(completion);
+
+                                // 动态添加查询类型后缀的选项
+                                for (String suffix : queryMethods.keySet()) {
+                                    completions.add(completion + suffix);
+                                }
+
+                                // 添加And/Or连接符选项
+                                completions.add(completion + "And");
+                                completions.add(completion + "Or");
+                            } else {
+                                // 部分匹配，避免重复字段
+                                if (!usedFields.contains(fieldName)) {
+                                    completions.add(completion);
+
+                                    // 动态添加查询类型后缀的选项
+                                    for (String suffix : queryMethods.keySet()) {
+                                        completions.add(completion + suffix);
+                                    }
+                                }
+                            }
+                        }
+
+                        // 检查字段名+部分QueryColumn方法名的匹配（在And/Or组合中）
+                        for (String suffix : queryMethods.keySet()) {
+                            String fieldWithSuffix = capitalizedFieldName + suffix;
+                            if (fieldWithSuffix.startsWith(remainingPart) && fieldWithSuffix.length() > remainingPart.length()) {
+                                // 避免重复字段
+                                if (!usedFields.contains(fieldName)) {
+                                    String prefix = fieldsPart.substring(0, fieldsPart.length() - remainingPart.length());
+                                    completions.add(prefix + fieldWithSuffix);
+                                }
                             }
                         }
                     }
@@ -576,9 +1369,51 @@ public class ServiceCompletionContributor extends CompletionContributor {
     }
 
     /**
-     * 检查输入是否以有效字段结尾
+     * 检查输入是否以有效字段结尾（包括带查询类型后缀的字段）
      */
-    private boolean endsWithValidField(String input, Map<String, FieldInfo> entityFields) {
+    private boolean endsWithValidField(String input, Map<String, FieldInfo> entityFields, Project project) {
+        for (String fieldName : entityFields.keySet()) {
+            String capitalizedFieldName = StrUtil.upperFirst(fieldName);
+            // 检查纯字段名
+            if (input.endsWith(capitalizedFieldName)) {
+                return true;
+            }
+
+            // 检查字段名+查询类型后缀
+            // 动态获取QueryColumn的方法名作为查询类型
+            Map<String, String> queryMethods = getQueryColumnMethods(project);
+            for (String suffix : queryMethods.keySet()) {
+                if (input.endsWith(capitalizedFieldName + suffix)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 检查输入是否以QueryColumn方法结尾
+     */
+    private boolean endsWithQueryColumnMethod(String input, Map<String, FieldInfo> entityFields, Project project) {
+        // 动态获取QueryColumn的方法名
+        Map<String, String> queryMethods = getQueryColumnMethods(project);
+
+        for (String suffix : queryMethods.keySet()) {
+            if (input.endsWith(suffix)) {
+                // 检查去掉后缀后是否以有效字段结尾
+                String withoutSuffix = input.substring(0, input.length() - suffix.length());
+                if (endsWithValidFieldName(withoutSuffix, entityFields)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 检查输入是否以有效字段名结尾（不包括查询类型后缀）
+     */
+    private boolean endsWithValidFieldName(String input, Map<String, FieldInfo> entityFields) {
         for (String fieldName : entityFields.keySet()) {
             String capitalizedFieldName = StrUtil.upperFirst(fieldName);
             if (input.endsWith(capitalizedFieldName)) {
@@ -586,6 +1421,61 @@ public class ServiceCompletionContributor extends CompletionContributor {
             }
         }
         return false;
+    }
+
+    /**
+     * 添加Service方法调用补全
+     */
+    private void addServiceMethodCallCompletion(CompletionResultSet result, PsiClass serviceInterface,
+                                              String entityQualifiedName, Project project, String prefix,
+                                              CompletionParameters parameters) {
+        try {
+            // 获取实体类字段信息
+            JavaPsiFacade psiFacade = JavaPsiFacade.getInstance(project);
+            GlobalSearchScope scope = GlobalSearchScope.allScope(project);
+            PsiClass entityClass = findEntityClass(entityQualifiedName, psiFacade, scope);
+            if (entityClass == null) {
+                return;
+            }
+
+            Map<String, FieldInfo> entityFields = getEntityFieldsInfo(entityClass);
+
+            // 获取TableDef字段映射
+            VirtualFile virtualFile = serviceInterface.getContainingFile().getVirtualFile();
+            String aptClass = TableDefUtils.getTableDefQualifiedName(entityQualifiedName, virtualFile);
+            Map<String, String> fieldToTableDefMapping = getFieldToTableDefMapping(entityQualifiedName, aptClass, project);
+
+            // 根据方法名生成查询方法
+            addMethodNameBasedCompletion(result, entityQualifiedName, project, aptClass, prefix, parameters);
+
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+
+
+    /**
+     * 添加And/Or连接符的补全选项
+     */
+    private void addAndOrCompletions(List<String> completions, String fieldsPart,
+                                   Map<String, FieldInfo> entityFields, Set<String> usedFields,
+                                   Map<String, String> queryMethods) {
+        // 为以QueryColumn方法结尾的字段添加And/Or连接符
+        for (String fieldName : entityFields.keySet()) {
+            String capitalizedFieldName = StrUtil.upperFirst(fieldName);
+            // 避免重复字段
+            if (!usedFields.contains(fieldName)) {
+                completions.add(fieldsPart + "And" + capitalizedFieldName);
+                completions.add(fieldsPart + "Or" + capitalizedFieldName);
+
+                // 也添加带查询类型后缀的选项
+                for (String suffix : queryMethods.keySet()) {
+                    completions.add(fieldsPart + "And" + capitalizedFieldName + suffix);
+                    completions.add(fieldsPart + "Or" + capitalizedFieldName + suffix);
+                }
+            }
+        }
     }
 
     /**
@@ -606,9 +1496,17 @@ public class ServiceCompletionContributor extends CompletionContributor {
      */
     private String generateMethodBody(String methodPrefix, String fieldsCompletion,
                                     Map<String, String> fieldToTableDefMapping, String simpleEntityName) {
+        return generateMethodBody(methodPrefix, fieldsCompletion, fieldToTableDefMapping, simpleEntityName, null);
+    }
 
-        // 解析字段组合
-        List<String> fields = parseFieldsFromCompletion(fieldsCompletion);
+    /**
+     * 生成方法体（支持动态查询类型）
+     */
+    private String generateMethodBody(String methodPrefix, String fieldsCompletion,
+                                    Map<String, String> fieldToTableDefMapping, String simpleEntityName, Project project) {
+
+        // 解析字段查询信息
+        List<FieldQueryInfo> fieldQueryInfos = parseFieldQueryInfoFromCompletion(fieldsCompletion, project);
         List<String> connectors = parseConnectorsFromCompletion(fieldsCompletion);
 
         // 获取TableDef静态变量名
@@ -617,8 +1515,11 @@ public class ServiceCompletionContributor extends CompletionContributor {
         StringBuilder methodBody = new StringBuilder();
         methodBody.append("QueryWrapper queryWrapper = QueryWrapper.create()");
 
-        for (int i = 0; i < fields.size(); i++) {
-            String field = fields.get(i);
+        for (int i = 0; i < fieldQueryInfos.size(); i++) {
+            FieldQueryInfo queryInfo = fieldQueryInfos.get(i);
+            String field = queryInfo.fieldName;
+            String queryType = queryInfo.queryType;
+
             String tableDefField = fieldToTableDefMapping.get(field);
             if (tableDefField == null) {
                 tableDefField = field.toUpperCase();
@@ -627,13 +1528,13 @@ public class ServiceCompletionContributor extends CompletionContributor {
             String fullFieldReference = tableDefInstanceName + "." + tableDefField;
 
             if (i == 0) {
-                methodBody.append("\n        .where(").append(fullFieldReference).append(".eq(").append(field).append("))");
+                methodBody.append("\n        .where(").append(fullFieldReference).append(".").append(queryType).append("(").append(field).append("))");
             } else {
                 String connector = i - 1 < connectors.size() ? connectors.get(i - 1) : "and";
                 if ("or".equalsIgnoreCase(connector)) {
-                    methodBody.append("\n        .or(").append(fullFieldReference).append(".eq(").append(field).append("))");
+                    methodBody.append("\n        .or(").append(fullFieldReference).append(".").append(queryType).append("(").append(field).append("))");
                 } else {
-                    methodBody.append("\n        .and(").append(fullFieldReference).append(".eq(").append(field).append("))");
+                    methodBody.append("\n        .and(").append(fullFieldReference).append(".").append(queryType).append("(").append(field).append("))");
                 }
             }
         }
@@ -649,6 +1550,14 @@ public class ServiceCompletionContributor extends CompletionContributor {
      */
     private String generateSingleFieldMethodBody(String methodPrefix, FieldInfo fieldInfo,
                                                 Map<String, String> fieldToTableDefMapping, String simpleEntityName) {
+        return generateSingleFieldMethodBody(methodPrefix, fieldInfo, fieldToTableDefMapping, simpleEntityName, "eq");
+    }
+
+    /**
+     * 生成单字段方法体（支持指定查询类型）
+     */
+    private String generateSingleFieldMethodBody(String methodPrefix, FieldInfo fieldInfo,
+                                                Map<String, String> fieldToTableDefMapping, String simpleEntityName, String queryType) {
 
         String tableDefField = fieldToTableDefMapping.get(fieldInfo.fieldName);
         if (tableDefField == null) {
@@ -661,7 +1570,7 @@ public class ServiceCompletionContributor extends CompletionContributor {
 
         StringBuilder methodBody = new StringBuilder();
         methodBody.append("QueryWrapper queryWrapper = QueryWrapper.create()\n");
-        methodBody.append("        .where(").append(fullFieldReference).append(".eq(").append(fieldInfo.fieldName).append("));\n");
+        methodBody.append("        .where(").append(fullFieldReference).append(".").append(queryType).append("(").append(fieldInfo.fieldName).append("));\n");
         methodBody.append(generateReturnStatement(methodPrefix, "queryWrapper", simpleEntityName));
 
         return methodBody.toString();
@@ -673,6 +1582,15 @@ public class ServiceCompletionContributor extends CompletionContributor {
     private String generateEntityMethodBody(String methodPrefix, Map<String, FieldInfo> entityFields,
                                           Map<String, String> fieldToTableDefMapping, String simpleEntityName,
                                           PsiClass entityClass) {
+        return generateEntityMethodBody(methodPrefix, entityFields, fieldToTableDefMapping, simpleEntityName, entityClass, "eq");
+    }
+
+    /**
+     * 生成整个实体的方法体（使用Condition条件判断，支持指定默认查询类型）
+     */
+    private String generateEntityMethodBody(String methodPrefix, Map<String, FieldInfo> entityFields,
+                                          Map<String, String> fieldToTableDefMapping, String simpleEntityName,
+                                          PsiClass entityClass, String defaultQueryType) {
 
         // 获取TableDef静态变量名
         String tableDefInstanceName = getTableDefInstanceName(simpleEntityName);
@@ -706,8 +1624,15 @@ public class ServiceCompletionContributor extends CompletionContributor {
             String fullFieldReference = tableDefInstanceName + "." + tableDefField;
             String entityFieldAccess = StrUtil.lowerFirst(simpleEntityName) + ".get" + StrUtil.upperFirst(fieldInfo.fieldName) + "()";
 
-            // 根据字段类型选择查询方法
-            String queryMethod = "String".equals(fieldInfo.fieldType) ? "like" : "eq";
+            // 根据默认查询类型和字段类型选择查询方法
+            String queryMethod;
+            if ("like".equals(defaultQueryType)) {
+                // like版本：String字段使用like，其他字段使用eq
+                queryMethod = "String".equals(fieldInfo.fieldType) ? "like" : "eq";
+            } else {
+                // eq版本：所有字段都使用eq
+                queryMethod = "eq";
+            }
 
             if (isFirst) {
                 methodBody.append("\n        .where(").append(fullFieldReference).append(".").append(queryMethod).append("(").append(entityFieldAccess).append(", ObjectUtil.isNotNull(").append(entityFieldAccess).append(")))");
@@ -727,23 +1652,209 @@ public class ServiceCompletionContributor extends CompletionContributor {
      * 从补全中解析字段
      */
     private List<String> parseFieldsFromCompletion(String completion) {
+        // 为了向后兼容，使用默认的查询类型映射
+        List<FieldQueryInfo> fieldQueryInfos = parseFieldQueryInfoFromCompletion(completion, null);
         List<String> fields = new ArrayList<>();
+        for (FieldQueryInfo info : fieldQueryInfos) {
+            fields.add(info.fieldName);
+        }
+        return fields;
+    }
+
+    /**
+     * 从补全中解析字段查询信息（包含查询类型）
+     */
+    private List<FieldQueryInfo> parseFieldQueryInfoFromCompletion(String completion, Project project) {
+        List<FieldQueryInfo> fieldQueryInfos = new ArrayList<>();
         String[] parts = completion.split("(?=And|Or)");
 
         for (String part : parts) {
+            String fieldPart;
             if (part.startsWith("And") || part.startsWith("Or")) {
-                String fieldName = part.substring(part.startsWith("And") ? 3 : 2);
-                if (StrUtil.isNotEmpty(fieldName)) {
-                    fields.add(StrUtil.lowerFirst(fieldName));
-                }
+                fieldPart = part.substring(part.startsWith("And") ? 3 : 2);
             } else {
-                if (StrUtil.isNotEmpty(part)) {
-                    fields.add(StrUtil.lowerFirst(part));
-                }
+                fieldPart = part;
+            }
+
+            if (StrUtil.isNotEmpty(fieldPart)) {
+                // 解析字段名和查询类型
+                FieldQueryInfo queryInfo = parseFieldAndQueryType(fieldPart, project);
+                fieldQueryInfos.add(queryInfo);
             }
         }
 
-        return fields;
+        return fieldQueryInfos;
+    }
+
+    /**
+     * 解析字段名和查询类型
+     */
+    private FieldQueryInfo parseFieldAndQueryType(String fieldPart, Project project) {
+        String fieldName = fieldPart;
+        String queryType = "eq"; // 默认使用eq
+
+        // 动态获取QueryColumn的方法名作为查询类型
+        Map<String, String> queryTypeMapping = getQueryColumnMethods(project);
+
+        // 检查是否有查询类型后缀
+        for (Map.Entry<String, String> entry : queryTypeMapping.entrySet()) {
+            String suffix = entry.getKey();
+            String methodName = entry.getValue();
+            if (fieldPart.endsWith(suffix)) {
+                fieldName = fieldPart.substring(0, fieldPart.length() - suffix.length());
+                queryType = methodName;
+                break;
+            }
+        }
+
+        return new FieldQueryInfo(StrUtil.lowerFirst(fieldName), queryType);
+    }
+
+    /**
+     * 获取QueryColumn类的public方法名，用作查询类型
+     */
+    private Map<String, String> getQueryColumnMethods(Project project) {
+        // 如果project为null，直接使用默认映射
+        if (project == null) {
+            Map<String, String> methodMapping = new HashMap<>();
+            addDefaultQueryMethods(methodMapping);
+            return methodMapping;
+        }
+
+        String projectKey = project.getLocationHash();
+
+        // 检查项目缓存
+        Map<String, String> cachedMethods = projectQueryColumnMethodsCache.get(projectKey);
+        if (cachedMethods != null) {
+            return cachedMethods;
+        }
+
+        // 缓存不存在，需要初始化
+        Map<String, String> methodMapping = initializeQueryColumnMethods(project);
+
+        // 缓存结果
+        projectQueryColumnMethodsCache.put(projectKey, methodMapping);
+
+        return methodMapping;
+    }
+
+    /**
+     * 初始化QueryColumn方法映射
+     */
+    private Map<String, String> initializeQueryColumnMethods(Project project) {
+        Map<String, String> methodMapping = new HashMap<>();
+
+        try {
+            // 通过PSI查找QueryColumn类
+            JavaPsiFacade psiFacade = JavaPsiFacade.getInstance(project);
+            PsiClass queryColumnClass = psiFacade.findClass("com.mybatisflex.core.query.QueryColumn",
+                GlobalSearchScope.allScope(project));
+
+            if (queryColumnClass != null) {
+                // 获取所有public方法
+                PsiMethod[] methods = queryColumnClass.getAllMethods();
+                Set<String> methodNames = new HashSet<>();
+
+                for (PsiMethod method : methods) {
+                    // 只获取public方法，排除构造方法、静态方法和Object的方法
+                    if (method.hasModifierProperty(PsiModifier.PUBLIC) &&
+                        !method.isConstructor() &&
+                        !method.hasModifierProperty(PsiModifier.STATIC) &&
+                        !isObjectMethod(method.getName())) {
+
+                        String methodName = method.getName();
+                        methodNames.add(methodName);
+                    }
+                }
+
+                // 将方法名转换为后缀映射
+                for (String methodName : methodNames) {
+                    String suffix = methodNameToSuffix(methodName);
+                    if (suffix != null) {
+                        methodMapping.put(suffix, methodName);
+                    }
+                }
+            }
+
+            // 如果没有找到方法或者为空，使用默认映射
+            if (methodMapping.isEmpty()) {
+                addDefaultQueryMethods(methodMapping);
+            }
+
+        } catch (Exception e) {
+            // 如果出错，使用默认映射
+            addDefaultQueryMethods(methodMapping);
+        }
+
+        return methodMapping;
+    }
+
+    /**
+     * 添加默认的查询方法映射
+     */
+    private void addDefaultQueryMethods(Map<String, String> methodMapping) {
+        methodMapping.put("Like", "like");
+        methodMapping.put("GreaterThan", "gt");
+        methodMapping.put("LessThan", "lt");
+        methodMapping.put("GreaterThanEqual", "ge");
+        methodMapping.put("LessThanEqual", "le");
+        methodMapping.put("NotEqual", "ne");
+        methodMapping.put("IsNull", "isNull");
+        methodMapping.put("IsNotNull", "isNotNull");
+        methodMapping.put("In", "in");
+        methodMapping.put("NotIn", "notIn");
+        methodMapping.put("Between", "between");
+        methodMapping.put("NotBetween", "notBetween");
+    }
+
+    /**
+     * 判断是否是Object类的方法
+     */
+    private boolean isObjectMethod(String methodName) {
+        return "equals".equals(methodName) || "hashCode".equals(methodName) ||
+               "toString".equals(methodName) || "clone".equals(methodName) ||
+               "finalize".equals(methodName) || "getClass".equals(methodName) ||
+               "notify".equals(methodName) || "notifyAll".equals(methodName) ||
+               "wait".equals(methodName);
+    }
+
+    /**
+     * 将方法名转换为后缀
+     */
+    private String methodNameToSuffix(String methodName) {
+        // 将方法名转换为驼峰后缀
+        if (methodName.length() <= 1) {
+            return null;
+        }
+
+        // 首字母大写
+        return StrUtil.upperFirst(methodName);
+    }
+
+    // 按项目缓存QueryColumn方法映射
+    private static final Map<String, Map<String, String>> projectQueryColumnMethodsCache = new HashMap<>();
+
+    /**
+     * 预加载QueryColumn方法缓存（供项目启动监听器调用）
+     */
+    public static void preloadQueryColumnMethods(Project project) {
+        if (project == null) {
+            return;
+        }
+
+        String projectKey = project.getLocationHash();
+
+        // 如果已经缓存过，直接返回
+        if (projectQueryColumnMethodsCache.containsKey(projectKey)) {
+            return;
+        }
+
+        // 创建临时实例来调用实例方法
+        ServiceCompletionContributor contributor = new ServiceCompletionContributor();
+        Map<String, String> methodMapping = contributor.initializeQueryColumnMethods(project);
+
+        // 手动设置缓存
+        projectQueryColumnMethodsCache.put(projectKey, methodMapping);
     }
 
     /**
@@ -810,48 +1921,6 @@ public class ServiceCompletionContributor extends CompletionContributor {
         }
     }
 
-    /**
-     * 插入方法实现
-     */
-    private void insertMethodImplementation(com.intellij.codeInsight.completion.InsertionContext context,
-                                          String methodSignature, String methodBody, String returnType) {
-
-        ApplicationManager.getApplication().runWriteAction(() -> {
-            try {
-                // 获取当前文档和编辑器
-                com.intellij.openapi.editor.Document document = context.getDocument();
-                com.intellij.openapi.editor.Editor editor = context.getEditor();
-
-                // 获取当前光标位置，但不删除已输入的内容
-                int startOffset = context.getStartOffset();
-
-                // 找到当前方法或类的结束位置
-                PsiFile psiFile = context.getFile();
-                PsiElement elementAtCaret = psiFile.findElementAt(startOffset);
-
-                // 找到合适的插入位置（当前方法后面或类的结束前）
-                int insertOffset = findInsertPosition(elementAtCaret, document);
-
-                // 构建完整的方法代码
-                StringBuilder methodCode = new StringBuilder();
-                methodCode.append("\n\n    ");
-                methodCode.append("public ").append(returnType).append(" ").append(methodSignature).append(" {\n");
-                methodCode.append("        ").append(methodBody).append("\n");
-                methodCode.append("    }");
-
-                // 插入完整的方法
-                document.insertString(insertOffset, methodCode.toString());
-
-                // 添加必要的导入
-                addRequiredImports(context, methodBody);
-
-                // 不移动光标，保持在原位置
-
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
-        });
-    }
 
     /**
      * 插入方法实现，光标聚焦到用户输入行的括号内
@@ -866,16 +1935,26 @@ public class ServiceCompletionContributor extends CompletionContributor {
                 // 获取当前文档和编辑器
                 com.intellij.openapi.editor.Document document = context.getDocument();
                 com.intellij.openapi.editor.Editor editor = context.getEditor();
+                Project project = context.getProject();
+
+                // 确保文档已提交
+                PsiDocumentManager.getInstance(project).commitAllDocuments();
 
                 // 获取当前光标位置
                 int startOffset = context.getStartOffset();
                 int tailOffset = context.getTailOffset();
 
+                // 获取当前类，判断是接口还是实现类
+                PsiFile psiFile = context.getFile();
+                PsiElement elementAtCaret = psiFile.findElementAt(startOffset);
+                PsiClass currentClass = PsiTreeUtil.getParentOfType(elementAtCaret, PsiClass.class);
+                boolean isInterface = currentClass != null && currentClass.isInterface();
+
                 // 解析字段并生成参数列表
                 StringBuilder paramBuilder = new StringBuilder();
 
                 // 检查是否是整个实体方法（通过fieldsCompletion判断）
-                if ("Entity".equals(fieldsCompletion)) {
+                if ("Entity".equals(fieldsCompletion) || "EntityLike".equals(fieldsCompletion)) {
                     // 整个实体方法，需要实体参数
                     String simpleEntityName = StrUtil.subAfter(entityQualifiedName, ".", true);
                     paramBuilder.append(simpleEntityName).append(" ").append(StrUtil.lowerFirst(simpleEntityName));
@@ -894,43 +1973,123 @@ public class ServiceCompletionContributor extends CompletionContributor {
                     }
                 }
 
-                // 找到合适的插入位置（在替换用户输入之前计算）
-                PsiFile psiFile = context.getFile();
-                PsiElement elementAtCaret = psiFile.findElementAt(startOffset);
-                int insertOffset = findInsertPosition(elementAtCaret, document);
+                if (isInterface) {
+                    // 在接口中，直接替换用户输入为完整的方法声明
+                    String methodComment = generateMethodComment(methodName, fieldsCompletion, entityFields, entityQualifiedName);
 
-                // 替换用户输入的内容为方法名和空括号
-                String userInputReplacement = methodName + "()";
-                document.replaceString(startOffset, tailOffset, userInputReplacement);
+                    StringBuilder methodDeclaration = new StringBuilder();
+                    methodDeclaration.append(methodComment);
+                    methodDeclaration.append("    ").append(returnType).append(" ").append(methodName).append("(");
+                    methodDeclaration.append(paramBuilder.toString()).append(");");
 
-                // 计算光标在括号内的位置（在替换后）
-                int cursorPosition = startOffset + methodName.length() + 1; // +1 for opening parenthesis
+                    // 直接替换用户输入的内容为完整的方法声明
+                    document.replaceString(startOffset, tailOffset, methodDeclaration.toString());
 
-                // 生成方法注释
-                String methodComment = generateMethodComment(methodName, fieldsCompletion, entityFields, entityQualifiedName);
+                    // 计算光标在方法声明末尾的位置
+                    int cursorPosition = startOffset + methodDeclaration.length();
 
-                // 构建完整的方法代码（在其他位置插入）
-                StringBuilder methodCode = new StringBuilder();
-                methodCode.append("\n\n");
-                methodCode.append(methodComment);
-                methodCode.append("    public ").append(returnType).append(" ").append(methodName).append("(");
-                methodCode.append(paramBuilder.toString()).append(") {\n");
+                    // 同时在实现类中生成方法实现
+                    generateImplementationMethodAsync(context.getProject(), currentClass, methodName, returnType,
+                                                    paramBuilder.toString(), methodBody, methodComment, entityQualifiedName);
 
-                // 直接使用方法体，保持原有缩进
-                methodCode.append("        ").append(methodBody.replace("\n", "\n        ")).append("\n");
+                    // 将光标定位到方法声明末尾
+                    editor.getCaretModel().moveToOffset(cursorPosition);
+                } else {
+                    // 在实现类中，找到合适的插入位置生成完整的方法实现
+                    int insertOffset = findInsertPosition(elementAtCaret, document);
 
-                methodCode.append("    }");
+                    // 替换用户输入的内容为方法名和空括号
+                    String userInputReplacement = methodName + "()";
+                    document.replaceString(startOffset, tailOffset, userInputReplacement);
 
-                // 插入完整的方法到合适位置
-                document.insertString(insertOffset, methodCode.toString());
+                    // 计算光标在括号内的位置（在替换后）
+                    int cursorPosition = startOffset + methodName.length() + 1; // +1 for opening parenthesis
 
-                // 添加必要的导入
-                addRequiredImports(context, methodBody);
+                    // 生成方法注释
+                    String methodComment = generateMethodComment(methodName, fieldsCompletion, entityFields, entityQualifiedName);
 
-                // 将光标定位到用户输入行的括号内
-                editor.getCaretModel().moveToOffset(cursorPosition);
+                    // 生成完整的方法实现
+                    StringBuilder methodCode = new StringBuilder();
+                    methodCode.append("\n\n");
+                    methodCode.append(methodComment);
+                    methodCode.append("    public ").append(returnType).append(" ").append(methodName).append("(");
+                    methodCode.append(paramBuilder.toString()).append(") {\n");
+
+                    // 直接使用方法体，保持原有缩进
+                    methodCode.append("        ").append(methodBody.replace("\n", "\n        ")).append("\n");
+
+                    methodCode.append("    }");
+
+                    // 插入完整的方法到合适位置
+                    document.insertString(insertOffset, methodCode.toString());
+
+                    // 添加必要的导入
+                    addRequiredImports(context, methodBody);
+
+                    // 将光标定位到用户输入行的括号内
+                    editor.getCaretModel().moveToOffset(cursorPosition);
+                }
 
             } catch (Exception e) {
+                e.printStackTrace();
+            }
+        });
+    }
+
+    /**
+     * 异步在实现类中生成方法实现
+     */
+    private void generateImplementationMethodAsync(Project project, PsiClass serviceInterface, String methodName,
+                                                 String returnType, String parameters, String methodBody,
+                                                 String methodComment, String entityQualifiedName) {
+        ApplicationManager.getApplication().executeOnPooledThread(() -> {
+            try {
+                // 在读取操作中查找实现类
+                PsiClass serviceImpl = ApplicationManager.getApplication().runReadAction((Computable<PsiClass>) () -> {
+                    return findServiceImplementation(serviceInterface, project);
+                });
+
+                if (serviceImpl == null) {
+                    System.err.println("Service implementation not found for interface: " + serviceInterface.getQualifiedName());
+                    return;
+                }
+
+                System.out.println("Found service implementation: " + serviceImpl.getQualifiedName());
+
+                // 在写入操作中生成方法实现
+                ApplicationManager.getApplication().invokeLater(() -> {
+                    WriteCommandAction.runWriteCommandAction(project, () -> {
+                        try {
+                            // 确保文档已提交
+                            PsiDocumentManager.getInstance(project).commitAllDocuments();
+
+                            PsiElementFactory factory = JavaPsiFacade.getElementFactory(project);
+
+                            // 生成完整的方法实现
+                            String methodText = methodComment +
+                                              "    @Override\n" +
+                                              "    public " + returnType + " " + methodName + "(" + parameters + ") {\n" +
+                                              "        " + methodBody.replace("\n", "\n        ") + "\n" +
+                                              "    }";
+
+                            System.out.println("Generated method text: " + methodText);
+
+                            PsiMethod method = factory.createMethodFromText(methodText, serviceImpl);
+
+                            // 在实现类中插入方法
+                            serviceImpl.add(method);
+
+                            System.out.println("Successfully added method to implementation class");
+
+                        } catch (Exception e) {
+                            System.err.println("Error generating method implementation: " + e.getMessage());
+                            e.printStackTrace();
+                        }
+                    });
+                });
+
+            } catch (Exception e) {
+                System.err.println("Error in generateImplementationMethodAsync: " + e.getMessage());
                 e.printStackTrace();
             }
         });
@@ -981,8 +2140,11 @@ public class ServiceCompletionContributor extends CompletionContributor {
         String action = getActionDescription(methodPrefix);
 
         if ("Entity".equals(fieldsCompletion)) {
-            // 整个实体方法
+            // 整个实体方法（eq版本）
             return action + simpleEntityName + "数据";
+        } else if ("EntityLike".equals(fieldsCompletion)) {
+            // 整个实体方法（like版本）
+            return "模糊" + action + simpleEntityName + "数据";
         } else {
             // 解析字段名，生成描述
             List<String> fields = parseFieldsFromCompletion(fieldsCompletion);
@@ -998,7 +2160,7 @@ public class ServiceCompletionContributor extends CompletionContributor {
                     if (i > 0) {
                         fieldDesc.append("和");
                     }
-                    fieldDesc.append(getFieldDescription(fieldInfo.fieldName));
+                    fieldDesc.append(getFieldDescription(fieldInfo.fieldName, entityQualifiedName, ProjectUtils.getCurrentProject()));
                 }
             }
 
@@ -1029,9 +2191,98 @@ public class ServiceCompletionContributor extends CompletionContributor {
     }
 
     /**
-     * 获取字段的中文描述
+     * 获取字段的中文描述（动态获取字段上的文档注释）
      */
-    private String getFieldDescription(String fieldName) {
+    private String getFieldDescription(String fieldName, String entityQualifiedName, Project project) {
+        try {
+            // 首先尝试从实体类的字段注释中获取描述
+            String commentDescription = getFieldCommentDescription(fieldName, entityQualifiedName, project);
+            if (StrUtil.isNotEmpty(commentDescription)) {
+                return commentDescription;
+            }
+        } catch (Exception e) {
+            // 如果获取注释失败，继续使用默认映射
+        }
+
+        // 如果没有找到注释，使用常见字段名的中文映射
+        return getDefaultFieldDescription(fieldName);
+    }
+
+    /**
+     * 从实体类字段的文档注释中获取描述
+     */
+    private String getFieldCommentDescription(String fieldName, String entityQualifiedName, Project project) {
+        try {
+            JavaPsiFacade psiFacade = JavaPsiFacade.getInstance(project);
+            PsiClass entityClass = psiFacade.findClass(entityQualifiedName, GlobalSearchScope.allScope(project));
+            if (entityClass == null) {
+                return null;
+            }
+
+            // 查找字段
+            PsiField field = entityClass.findFieldByName(fieldName, false);
+            if (field == null) {
+                return null;
+            }
+
+            // 获取字段的文档注释
+            PsiDocComment docComment = field.getDocComment();
+            if (docComment != null) {
+                String commentText = docComment.getText();
+                // 提取注释中的描述文本
+                return extractDescriptionFromComment(commentText);
+            }
+
+            // 如果没有文档注释，尝试获取行注释
+            PsiComment[] comments = PsiTreeUtil.getChildrenOfType(field, PsiComment.class);
+            if (comments != null && comments.length > 0) {
+                for (PsiComment comment : comments) {
+                    String commentText = comment.getText();
+                    if (commentText.startsWith("//")) {
+                        String description = commentText.substring(2).trim();
+                        if (StrUtil.isNotEmpty(description)) {
+                            return description;
+                        }
+                    }
+                }
+            }
+
+        } catch (Exception e) {
+            // 忽略异常，返回null
+        }
+        return null;
+    }
+
+    /**
+     * 从注释文本中提取描述
+     */
+    private String extractDescriptionFromComment(String commentText) {
+        if (StrUtil.isEmpty(commentText)) {
+            return null;
+        }
+
+        // 移除注释标记
+        String cleaned = commentText.replaceAll("/\\*\\*", "")
+                                   .replaceAll("\\*/", "")
+                                   .replaceAll("\\*", "")
+                                   .trim();
+
+        // 提取第一行非空内容作为描述
+        String[] lines = cleaned.split("\n");
+        for (String line : lines) {
+            String trimmed = line.trim();
+            if (StrUtil.isNotEmpty(trimmed) && !trimmed.startsWith("@")) {
+                return trimmed;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * 获取默认的字段描述（基于字段名映射）
+     */
+    private String getDefaultFieldDescription(String fieldName) {
         // 常见字段名的中文映射
         switch (fieldName.toLowerCase()) {
             case "id":
@@ -1108,23 +2359,8 @@ public class ServiceCompletionContributor extends CompletionContributor {
         return result.toString();
     }
 
-    /**
-     * 获取当前行的文本
-     */
-    private String getCurrentLineText(com.intellij.openapi.editor.Document document, int offset) {
-        int lineNumber = document.getLineNumber(offset);
-        int lineStartOffset = document.getLineStartOffset(lineNumber);
-        int lineEndOffset = document.getLineEndOffset(lineNumber);
-        return document.getText().substring(lineStartOffset, lineEndOffset);
-    }
+  
 
-    /**
-     * 获取当前行的开始偏移量
-     */
-    private int getLineStartOffset(com.intellij.openapi.editor.Document document, int offset) {
-        int lineNumber = document.getLineNumber(offset);
-        return document.getLineStartOffset(lineNumber);
-    }
 
     /**
      * 找到合适的插入位置
