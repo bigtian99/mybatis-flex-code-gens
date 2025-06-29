@@ -1649,11 +1649,14 @@ public class ServiceCompletionContributor extends CompletionContributor {
                 // 1. 先在接口中生成方法声明
                 PsiElementFactory factory = JavaPsiFacade.getElementFactory(project);
 
-                String interfaceMethodText = methodComment + "\n" +
-                                           returnType + " " + methodName + "(" + paramBuilder.toString() + ");";
+                // 只创建纯粹的方法声明，不包含注释
+                String methodDeclaration = returnType + " " + methodName + "(" + paramBuilder.toString() + ");";
+                PsiMethod interfaceMethod = factory.createMethodFromText(methodDeclaration, serviceInterface);
 
-                PsiMethod interfaceMethod = factory.createMethodFromText(interfaceMethodText, serviceInterface);
+                // 添加方法到接口
                 serviceInterface.add(interfaceMethod);
+
+                // 如果需要注释，可以通过文档操作添加（这里先简化处理）
 
                 System.out.println("Added method to interface: " + methodName);
 
@@ -2288,15 +2291,13 @@ public class ServiceCompletionContributor extends CompletionContributor {
 
                             PsiElementFactory factory = JavaPsiFacade.getElementFactory(project);
 
-                            // 生成正确格式的方法实现（去掉注释中的缩进）
-                            String cleanMethodComment = methodComment.replace("    /**", "/**").replace("    */", "*/").replace("     *", " *");
-
-                            String methodText = cleanMethodComment + "\n" +
-                                              "@Override\n" +
+                            // 生成纯粹的方法实现，不包含注释
+                            String methodText = "@Override\n" +
                                               "public " + returnType + " " + methodName + "(" + parameters + ") {\n" +
                                               "    " + methodBody.replace("\n", "\n    ") + "\n" +
                                               "}";
 
+                            System.out.println("Generated method text: " + methodText);
 
                             PsiMethod method = factory.createMethodFromText(methodText, serviceImpl);
 
