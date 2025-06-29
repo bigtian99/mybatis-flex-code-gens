@@ -204,7 +204,7 @@ public class ServiceCompletionContributor extends CompletionContributor {
             String methodPrefix = extractMethodPrefix(prefix);
             if (StrUtil.isEmpty(methodPrefix)) {
                 // 如果没有完整的方法前缀，提供方法前缀补全
-                addMethodPrefixCompletions(result, prefix, entityFields, fieldToTableDefMapping, entityQualifiedName, currentServiceClass);
+                addMethodPrefixCompletions(result, prefix, entityFields, fieldToTableDefMapping, entityQualifiedName, currentServiceClass, entityClass);
                 return;
             }
 
@@ -246,7 +246,7 @@ public class ServiceCompletionContributor extends CompletionContributor {
      */
     private void addMethodPrefixCompletions(CompletionResultSet result, String prefix,
                                           Map<String, FieldInfo> entityFields, Map<String, String> fieldToTableDefMapping,
-                                          String entityQualifiedName, PsiClass currentServiceClass) {
+                                          String entityQualifiedName, PsiClass currentServiceClass, PsiClass entityClass) {
 
         String simpleEntityName = StrUtil.subAfter(entityQualifiedName, ".", true);
         String[] queryPrefixes = {"listBy", "findBy", "getBy", "countBy", "existsBy", "removeBy", "deleteBy"};
@@ -260,7 +260,7 @@ public class ServiceCompletionContributor extends CompletionContributor {
                     String entityMethodName = queryPrefix + simpleEntityName;
                     if (currentServiceClass == null || !methodExists(currentServiceClass, entityMethodName)) {
                         String entityMethodSignature = entityMethodName + "()";
-                        String entityMethodBody = generateEntityMethodBody(queryPrefix, entityFields, fieldToTableDefMapping, simpleEntityName);
+                        String entityMethodBody = generateEntityMethodBody(queryPrefix, entityFields, fieldToTableDefMapping, simpleEntityName, entityClass);
                         String returnType = getReturnTypeForMethodPrefix(queryPrefix, simpleEntityName);
 
                         LookupElement entityMethodElement = LookupElementBuilder.create(entityMethodSignature)
@@ -671,7 +671,8 @@ public class ServiceCompletionContributor extends CompletionContributor {
      * 生成整个实体的方法体（使用Condition条件判断）
      */
     private String generateEntityMethodBody(String methodPrefix, Map<String, FieldInfo> entityFields,
-                                          Map<String, String> fieldToTableDefMapping, String simpleEntityName) {
+                                          Map<String, String> fieldToTableDefMapping, String simpleEntityName,
+                                          PsiClass entityClass) {
 
         // 获取TableDef静态变量名
         String tableDefInstanceName = getTableDefInstanceName(simpleEntityName);
@@ -679,22 +680,40 @@ public class ServiceCompletionContributor extends CompletionContributor {
         StringBuilder methodBody = new StringBuilder();
         methodBody.append("QueryWrapper queryWrapper = QueryWrapper.create()");
 
-        boolean isFirst = true;
-        for (FieldInfo fieldInfo : entityFields.values()) {
-            String tableDefField = fieldToTableDefMapping.get(fieldInfo.fieldName);
-            // 只处理在APT中确实存在的字段
-            if (tableDefField == null) {
-                continue; // 跳过APT中不存在的字段
+        // 按照实体类中字段的定义顺序处理
+        List<FieldInfo> orderedFields = new ArrayList<>();
+        PsiField[] fields = entityClass.getAllFields();
+        for (PsiField field : fields) {
+            // 跳过静态字段和常量
+            if (field.hasModifierProperty(PsiModifier.STATIC) ||
+                field.hasModifierProperty(PsiModifier.FINAL)) {
+                continue;
             }
 
+            String fieldName = field.getName();
+            FieldInfo fieldInfo = entityFields.get(fieldName);
+            String tableDefField = fieldToTableDefMapping.get(fieldName);
+
+            // 只处理在APT中确实存在的字段
+            if (fieldInfo != null && tableDefField != null) {
+                orderedFields.add(fieldInfo);
+            }
+        }
+
+        boolean isFirst = true;
+        for (FieldInfo fieldInfo : orderedFields) {
+            String tableDefField = fieldToTableDefMapping.get(fieldInfo.fieldName);
             String fullFieldReference = tableDefInstanceName + "." + tableDefField;
             String entityFieldAccess = StrUtil.lowerFirst(simpleEntityName) + ".get" + StrUtil.upperFirst(fieldInfo.fieldName) + "()";
 
+            // 根据字段类型选择查询方法
+            String queryMethod = "String".equals(fieldInfo.fieldType) ? "like" : "eq";
+
             if (isFirst) {
-                methodBody.append("\n        .where(").append(fullFieldReference).append(".eq(").append(entityFieldAccess).append(", ObjectUtil.isNotNull(").append(entityFieldAccess).append(")))");
+                methodBody.append("\n        .where(").append(fullFieldReference).append(".").append(queryMethod).append("(").append(entityFieldAccess).append(", ObjectUtil.isNotNull(").append(entityFieldAccess).append(")))");
                 isFirst = false;
             } else {
-                methodBody.append("\n        .and(").append(fullFieldReference).append(".eq(").append(entityFieldAccess).append(", ObjectUtil.isNotNull(").append(entityFieldAccess).append(")))");
+                methodBody.append("\n        .and(").append(fullFieldReference).append(".").append(queryMethod).append("(").append(entityFieldAccess).append(", ObjectUtil.isNotNull(").append(entityFieldAccess).append(")))");
             }
         }
 
@@ -887,10 +906,14 @@ public class ServiceCompletionContributor extends CompletionContributor {
                 // 计算光标在括号内的位置（在替换后）
                 int cursorPosition = startOffset + methodName.length() + 1; // +1 for opening parenthesis
 
+                // 生成方法注释
+                String methodComment = generateMethodComment(methodName, fieldsCompletion, entityFields, entityQualifiedName);
+
                 // 构建完整的方法代码（在其他位置插入）
                 StringBuilder methodCode = new StringBuilder();
-                methodCode.append("\n\n    ");
-                methodCode.append("public ").append(returnType).append(" ").append(methodName).append("(");
+                methodCode.append("\n\n");
+                methodCode.append(methodComment);
+                methodCode.append("    public ").append(returnType).append(" ").append(methodName).append("(");
                 methodCode.append(paramBuilder.toString()).append(") {\n");
 
                 // 直接使用方法体，保持原有缩进
@@ -911,6 +934,178 @@ public class ServiceCompletionContributor extends CompletionContributor {
                 e.printStackTrace();
             }
         });
+    }
+
+    /**
+     * 生成方法注释
+     */
+    private String generateMethodComment(String methodName, String fieldsCompletion,
+                                       Map<String, FieldInfo> entityFields, String entityQualifiedName) {
+        StringBuilder comment = new StringBuilder();
+        comment.append("    /**\n");
+
+        // 解析方法名，生成描述
+        String methodPrefix = extractMethodPrefixFromMethodName(methodName);
+        String description = generateMethodDescription(methodName, methodPrefix, fieldsCompletion, entityFields, entityQualifiedName);
+
+        comment.append("     * ").append(description).append("\n");
+        comment.append("     */\n");
+
+        return comment.toString();
+    }
+
+    /**
+     * 从方法名中提取方法前缀
+     */
+    private String extractMethodPrefixFromMethodName(String methodName) {
+        String lowerMethodName = methodName.toLowerCase();
+        String[] queryPrefixes = {"listby", "findby", "getby", "countby", "existsby", "removeby", "deleteby"};
+        String[] originalPrefixes = {"listBy", "findBy", "getBy", "countBy", "existsBy", "removeBy", "deleteBy"};
+
+        for (int i = 0; i < queryPrefixes.length; i++) {
+            if (lowerMethodName.startsWith(queryPrefixes[i])) {
+                return originalPrefixes[i];
+            }
+        }
+        return "listBy"; // 默认值
+    }
+
+    /**
+     * 生成方法描述
+     */
+    private String generateMethodDescription(String methodName, String methodPrefix, String fieldsCompletion,
+                                           Map<String, FieldInfo> entityFields, String entityQualifiedName) {
+        String simpleEntityName = StrUtil.subAfter(entityQualifiedName, ".", true);
+
+        // 根据方法前缀生成动作描述
+        String action = getActionDescription(methodPrefix);
+
+        if ("Entity".equals(fieldsCompletion)) {
+            // 整个实体方法
+            return action + simpleEntityName + "数据";
+        } else {
+            // 解析字段名，生成描述
+            List<String> fields = parseFieldsFromCompletion(fieldsCompletion);
+            if (fields.isEmpty()) {
+                return action + simpleEntityName + "数据";
+            }
+
+            StringBuilder fieldDesc = new StringBuilder();
+            for (int i = 0; i < fields.size(); i++) {
+                String field = fields.get(i);
+                FieldInfo fieldInfo = entityFields.get(field);
+                if (fieldInfo != null) {
+                    if (i > 0) {
+                        fieldDesc.append("和");
+                    }
+                    fieldDesc.append(getFieldDescription(fieldInfo.fieldName));
+                }
+            }
+
+            return "根据" + fieldDesc.toString() + action + simpleEntityName + "数据";
+        }
+    }
+
+    /**
+     * 根据方法前缀获取动作描述
+     */
+    private String getActionDescription(String methodPrefix) {
+        switch (methodPrefix.toLowerCase()) {
+            case "listby":
+            case "findby":
+                return "查询";
+            case "getby":
+                return "获取";
+            case "countby":
+                return "统计";
+            case "existsby":
+                return "判断是否存在";
+            case "removeby":
+            case "deleteby":
+                return "删除";
+            default:
+                return "查询";
+        }
+    }
+
+    /**
+     * 获取字段的中文描述
+     */
+    private String getFieldDescription(String fieldName) {
+        // 常见字段名的中文映射
+        switch (fieldName.toLowerCase()) {
+            case "id":
+                return "ID";
+            case "name":
+                return "名称";
+            case "title":
+                return "标题";
+            case "createby":
+            case "creator":
+                return "创建人";
+            case "createtime":
+            case "createdat":
+                return "创建时间";
+            case "updateby":
+            case "updater":
+                return "更新人";
+            case "updatetime":
+            case "updatedat":
+                return "更新时间";
+            case "status":
+                return "状态";
+            case "type":
+                return "类型";
+            case "code":
+                return "编码";
+            case "key":
+                return "键";
+            case "value":
+                return "值";
+            case "description":
+            case "desc":
+                return "描述";
+            case "remark":
+                return "备注";
+            case "email":
+                return "邮箱";
+            case "phone":
+                return "电话";
+            case "address":
+                return "地址";
+            case "url":
+                return "链接";
+            case "path":
+                return "路径";
+            case "version":
+                return "版本";
+            case "sort":
+            case "order":
+                return "排序";
+            default:
+                // 如果没有匹配的，使用驼峰转换
+                return convertCamelToChineseDesc(fieldName);
+        }
+    }
+
+    /**
+     * 将驼峰命名转换为中文描述
+     */
+    private String convertCamelToChineseDesc(String camelCase) {
+        if (StrUtil.isEmpty(camelCase)) {
+            return camelCase;
+        }
+
+        // 简单处理：在大写字母前添加空格，然后返回原字段名
+        StringBuilder result = new StringBuilder();
+        for (int i = 0; i < camelCase.length(); i++) {
+            char c = camelCase.charAt(i);
+            if (Character.isUpperCase(c) && i > 0) {
+                result.append(" ");
+            }
+            result.append(Character.toLowerCase(c));
+        }
+        return result.toString();
     }
 
     /**
