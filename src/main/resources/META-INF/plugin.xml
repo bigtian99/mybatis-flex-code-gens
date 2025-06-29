@@ -87,6 +87,11 @@
                                 id="club.bigtian.mf.plugin.core.contributor.MybatisFlexTemplateCompletionContributor"
                                 implementationClass="club.bigtian.mf.plugin.core.contributor.MybatisFlexTemplateCompletionContributor"/>
 
+        <!-- Service层APT补全贡献者 -->
+        <completion.contributor language="JAVA"
+                                id="club.bigtian.mf.plugin.core.contributor.ServiceCompletionContributor"
+                                implementationClass="club.bigtian.mf.plugin.core.contributor.ServiceCompletionContributor"/>
+
 <!--        <completion.contributor language="JAVA"-->
 <!--                                id="club.bigtian.mf.plugin.core.contributor.MybatisFlexTableDefCompletionContributor"-->
 <!--                                implementationClass="club.bigtian.mf.plugin.core.contributor.MybatisFlexTableDefCompletionContributor"/>-->
@@ -97,6 +102,10 @@
 
         <annotator language="JAVA"
                    id="club.bigtian.mf.plugin.core.annotator.MybatisFlexConfigAnnotator"
+                   order="first"
+                   implementationClass="club.bigtian.mf.plugin.core.annotator.MybatisFlexConfigAnnotator"/>
+        <annotator language="JAVA"
+                   id="club.bigtian.mf.plugin.core.contributor.ServiceCompletionContributor"
                    order="first"
                    implementationClass="club.bigtian.mf.plugin.core.annotator.MybatisFlexConfigAnnotator"/>
 
