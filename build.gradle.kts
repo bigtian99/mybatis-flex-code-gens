@@ -118,23 +118,11 @@ tasks {
 
 intellijPlatformTesting {
     runIde {
-        tasks{
-            runIde{
-                jvmArgumentProviders += CommandLineArgumentProvider {
-                    listOf(
-                        "-javaagent:/Users/daijunxiong/app/jetbra/ja-netfilter.jar=jetbrains",  // 添加的 JVM 参数
-                        "--add-opens=java.base/jdk.internal.org.objectweb.asm=ALL-UNNAMED",
-                        "--add-opens=java.base/jdk.internal.org.objectweb.asm.tree=ALL-UNNAMED"
-                    )
-                }
-            }
-        }
         register("runIdeForUiTests") {
             task {
                 // 添加 JVM 参数
                 jvmArgumentProviders += CommandLineArgumentProvider {
                     listOf(
-                        "-javaagent:/Users/daijunxiong/app/jetbra/ja-netfilter.jar=jetbrains",  // 添加的 JVM 参数
                         "--add-opens=java.base/jdk.internal.org.objectweb.asm=ALL-UNNAMED",
                         "--add-opens=java.base/jdk.internal.org.objectweb.asm.tree=ALL-UNNAMED"
                     )
@@ -142,7 +130,7 @@ intellijPlatformTesting {
             }
 
             plugins {
-                robotServerPlugin()  // 插件配置（如果有）
+                robotServerPlugin()
             }
         }
     }

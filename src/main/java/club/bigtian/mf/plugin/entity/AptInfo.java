@@ -17,7 +17,7 @@ public class AptInfo {
     }
 
     public void setLarge(boolean large) {
-        large = large;
+        this.large = large;
     }
 
     public String getName() {
