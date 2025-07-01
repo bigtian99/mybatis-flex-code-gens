@@ -628,7 +628,7 @@ public class ServiceCompletionContributor extends CompletionContributor {
 
         for (int i = 0; i < queryPrefixes.length; i++) {
             String queryPrefix = queryPrefixes[i];
-            if (lowerPrefix.startsWith(queryPrefix) && prefix.length() > queryPrefix.length()) {
+            if (lowerPrefix.startsWith(queryPrefix) && prefix.length() >= queryPrefix.length()) {
                 return originalPrefixes[i]; // 返回标准格式的前缀
             }
         }
@@ -1253,7 +1253,14 @@ public class ServiceCompletionContributor extends CompletionContributor {
                 String capitalizedFieldName = StrUtil.upperFirst(fieldName);
                 // 避免重复字段
                 if (!usedFields.contains(fieldName)) {
+                    // 添加基本字段补全
                     completions.add(fieldsPart + capitalizedFieldName);
+
+                    // 添加带查询类型后缀的字段补全
+                    Map<String, String> queryMethods1 = getQueryColumnMethods(project);
+                    for (String suffix : queryMethods1.keySet()) {
+                        completions.add(fieldsPart + capitalizedFieldName + suffix);
+                    }
                 }
             }
             return completions;
@@ -1376,19 +1383,41 @@ public class ServiceCompletionContributor extends CompletionContributor {
     private Set<String> getUsedFieldsFromInput(String input) {
         Set<String> usedFields = new HashSet<>();
 
-        // 分割And/Or，提取字段名
-        String[] parts = input.split("(?=And|Or)");
-        for (String part : parts) {
-            String fieldPart = part;
-            if (fieldPart.startsWith("And") || fieldPart.startsWith("Or")) {
-                fieldPart = fieldPart.substring(fieldPart.startsWith("And") ? 3 : 2);
-            }
+        if (StrUtil.isEmpty(input)) {
+            return usedFields;
+        }
 
-            if (StrUtil.isNotEmpty(fieldPart)) {
-                // 转换为小写驼峰形式
-                String fieldName = StrUtil.lowerFirst(fieldPart);
-                usedFields.add(fieldName);
+        // 处理以And或Or结尾的情况
+        String workingInput = input;
+        if (input.endsWith("And") || input.endsWith("Or")) {
+            // 移除末尾的And/Or
+            workingInput = input.endsWith("And") ?
+                input.substring(0, input.length() - 3) :
+                input.substring(0, input.length() - 2);
+        }
+
+        // 使用正则表达式分割字段名
+        // 匹配And或Or前面的内容
+        String[] parts = workingInput.split("(?=And|Or)|(?<=And|Or)");
+
+        StringBuilder currentField = new StringBuilder();
+        for (String part : parts) {
+            if ("And".equals(part) || "Or".equals(part)) {
+                // 遇到连接符，保存当前字段
+                if (currentField.length() > 0) {
+                    String fieldName = StrUtil.lowerFirst(currentField.toString());
+                    usedFields.add(fieldName);
+                    currentField.setLength(0);
+                }
+            } else {
+                currentField.append(part);
             }
+        }
+
+        // 处理最后一个字段
+        if (currentField.length() > 0) {
+            String fieldName = StrUtil.lowerFirst(currentField.toString());
+            usedFields.add(fieldName);
         }
 
         return usedFields;
@@ -1498,12 +1527,92 @@ public class ServiceCompletionContributor extends CompletionContributor {
 
             String fieldsPart = prefix.substring(methodPrefix.length());
 
+            // 如果字段部分为空（即刚输入完方法前缀如listBy），直接显示所有字段补全
+            if (StrUtil.isEmpty(fieldsPart)) {
+                addServiceCallFieldCompletions(result, serviceInterface, methodPrefix, entityFields, fieldToTableDefMapping, entityQualifiedName);
+                return;
+            }
+
             // 生成可能的方法补全
             generateServiceCallMethodCompletions(result, serviceInterface, methodPrefix, fieldsPart, entityFields, fieldToTableDefMapping, entityQualifiedName, project);
 
         } catch (Exception e) {
             e.printStackTrace();
         }
+    }
+
+    /**
+     * 添加Service方法调用的字段补全（当刚输入完方法前缀时）
+     */
+    private void addServiceCallFieldCompletions(CompletionResultSet result, PsiClass serviceInterface,
+                                              String methodPrefix, Map<String, FieldInfo> entityFields,
+                                              Map<String, String> fieldToTableDefMapping, String entityQualifiedName) {
+
+        String simpleEntityName = StrUtil.subAfter(entityQualifiedName, ".", true);
+
+        for (FieldInfo fieldInfo : entityFields.values()) {
+            // 只处理在APT TableDef中存在的字段
+            if (!fieldToTableDefMapping.containsKey(fieldInfo.fieldName)) {
+                continue; // 跳过APT中不存在的字段
+            }
+
+            String capitalizedFieldName = StrUtil.upperFirst(fieldInfo.fieldName);
+            String methodName = methodPrefix + capitalizedFieldName;
+
+            // 检查方法是否已存在
+            if (methodExists(serviceInterface, methodName)) {
+                continue; // 跳过已存在的方法
+            }
+
+            // 添加基本字段方法
+            addServiceCallFieldMethod(result, serviceInterface, methodName, methodPrefix, fieldInfo,
+                                    fieldToTableDefMapping, simpleEntityName, entityQualifiedName, "");
+
+            // 添加带查询类型后缀的方法
+            try {
+                Map<String, String> queryMethods = getQueryColumnMethods(serviceInterface.getProject());
+                for (String suffix : queryMethods.keySet()) {
+                    String methodWithSuffix = methodPrefix + capitalizedFieldName + suffix;
+
+                    // 检查方法是否已存在
+                    if (methodExists(serviceInterface, methodWithSuffix)) {
+                        continue; // 跳过已存在的方法
+                    }
+
+                    addServiceCallFieldMethod(result, serviceInterface, methodWithSuffix, methodPrefix, fieldInfo,
+                                            fieldToTableDefMapping, simpleEntityName, entityQualifiedName, suffix);
+                }
+            } catch (Exception e) {
+                // 如果获取查询方法失败，只添加基本方法
+            }
+        }
+    }
+
+    /**
+     * 添加单个Service方法调用的字段方法
+     */
+    private void addServiceCallFieldMethod(CompletionResultSet result, PsiClass serviceInterface,
+                                         String methodName, String methodPrefix, FieldInfo fieldInfo,
+                                         Map<String, String> fieldToTableDefMapping, String simpleEntityName,
+                                         String entityQualifiedName, String querySuffix) {
+
+        String methodSignature = methodName + "()";
+        String returnType = getReturnTypeForMethodPrefix(methodPrefix, simpleEntityName);
+        String methodBody = generateSingleFieldMethodBody(methodPrefix, fieldInfo, fieldToTableDefMapping, simpleEntityName);
+
+        LookupElement methodElement = LookupElementBuilder.create(methodSignature)
+                .withPresentableText(methodSignature)
+                .withTypeText(returnType)
+                .withTailText(" { generate in interface and implementation }", true)
+                .withIcon(Icons.FLEX)
+                .withInsertHandler((context, item) -> {
+                    Map<String, FieldInfo> singleFieldMap = new HashMap<>();
+                    singleFieldMap.put(fieldInfo.fieldName, fieldInfo);
+                    generateServiceMethodInInterfaceAndImpl(context, serviceInterface, methodName, methodBody, returnType,
+                                                           fieldInfo.fieldName, singleFieldMap, entityQualifiedName, fieldToTableDefMapping);
+                });
+
+        result.addElement(methodElement);
     }
 
     /**
@@ -2271,6 +2380,12 @@ public class ServiceCompletionContributor extends CompletionContributor {
         excludedMethods.add("round");
         excludedMethods.add("floor");
         excludedMethods.add("ceil");
+        excludedMethods.add("getTable");
+        excludedMethods.add("getName");
+        excludedMethods.add("getAlias");
+        excludedMethods.add("setTable");
+        excludedMethods.add("setName");
+        excludedMethods.add("setAlias");
 
         return excludedMethods.contains(methodName);
     }

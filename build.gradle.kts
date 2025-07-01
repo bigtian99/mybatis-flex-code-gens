@@ -124,7 +124,8 @@ intellijPlatformTesting {
                 jvmArgumentProviders += CommandLineArgumentProvider {
                     listOf(
                         "--add-opens=java.base/jdk.internal.org.objectweb.asm=ALL-UNNAMED",
-                        "--add-opens=java.base/jdk.internal.org.objectweb.asm.tree=ALL-UNNAMED"
+                        "--add-opens=java.base/jdk.internal.org.objectweb.asm.tree=ALL-UNNAMED",
+                        "-javaagent:/Users/daijunxiong/app/jetbra/ja-netfilter.jar=jetbrains"
                     )
                 }
             }
