@@ -6,9 +6,11 @@ import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.command.WriteCommandAction;
 import com.intellij.openapi.project.Project;
 import com.intellij.psi.*;
+import com.intellij.psi.javadoc.PsiDocComment;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.search.searches.ClassInheritorsSearch;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -153,7 +155,7 @@ public class ServiceMethodGenerator {
     /**
      * 异步在实现类中生成方法实现
      */
-    private void generateImplementationMethodAsync(Project project, PsiClass serviceInterface, String methodName,
+    public void generateImplementationMethodAsync(Project project, PsiClass serviceInterface, String methodName,
                                                  String returnType, String parameters, String methodBody,
                                                  String fieldsCompletion, Map<String, FieldInfo> entityFields, String entityQualifiedName) {
         // 在读取操作中获取必要信息

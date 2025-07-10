@@ -133,7 +133,7 @@ public class MethodBodyGenerator {
     /**
      * 生成返回语句
      */
-    private String generateReturnStatement(String methodPrefix, String queryWrapper, String simpleEntityName) {
+    public String generateReturnStatement(String methodPrefix, String queryWrapper, String simpleEntityName) {
         String lowerMethodPrefix = methodPrefix.toLowerCase();
         switch (lowerMethodPrefix) {
             case "listby":
