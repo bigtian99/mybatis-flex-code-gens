@@ -2,6 +2,7 @@ package club.bigtian.mf.plugin.core.contributor;
 
 import club.bigtian.mf.plugin.core.generator.ServiceMethodGenerator;
 import club.bigtian.mf.plugin.core.generator.MethodBodyGenerator;
+import club.bigtian.mf.plugin.core.generator.ImportManager;
 import club.bigtian.mf.plugin.core.parser.FieldParser;
 import club.bigtian.mf.plugin.core.icons.Icons;
 import club.bigtian.mf.plugin.core.util.ProjectUtils;
@@ -1029,6 +1030,10 @@ public class ServiceCompletionContributor extends CompletionContributor {
             // 在实现类中插入方法
             WriteCommandAction.runWriteCommandAction(project, () -> {
                 serviceImpl.add(method);
+
+                // 添加必要的导入语句
+                ImportManager importManager = new ImportManager();
+                importManager.addRequiredImportsToFile(serviceImpl.getContainingFile(), methodBody, project);
             });
 
         } catch (Exception e) {
