@@ -444,7 +444,7 @@ public class ServiceCompletionContributor extends CompletionContributor {
             String fieldsPart = prefix.substring(methodPrefix.length());
 
             // 生成可能的方法补全
-            generateMethodCompletions(result, methodPrefix, fieldsPart, entityFields, fieldToTableDefMapping, entityQualifiedName, currentServiceClass, project);
+            generateMethodCompletions(result, methodPrefix, fieldsPart, entityFields, fieldToTableDefMapping, entityQualifiedName, currentServiceClass, project, entityClass);
 
         } catch (Exception e) {
             e.printStackTrace();
@@ -533,7 +533,13 @@ public class ServiceCompletionContributor extends CompletionContributor {
                             .withTailText(" { " + methodBody + " }", true)
                             .withIcon(Icons.FLEX)
                             .withInsertHandler((context, item) -> {
-                                insertMethodImplementationWithCursor(context, methodName, methodBody, returnType, capitalizedFieldName, singleFieldMap, entityQualifiedName, fieldToTableDefMapping);
+                                // 使用统一的方法生成
+                                PsiElement element = context.getFile().findElementAt(context.getStartOffset());
+                                PsiClass currentClass = PsiTreeUtil.getParentOfType(element, PsiClass.class);
+                                Map<String, ServiceMethodGenerator.FieldInfo> newEntityFields = new HashMap<>();
+                                newEntityFields.put(fieldInfo.fieldName, convertToNewFieldInfo(fieldInfo));
+                                methodGenerator.generateUnifiedMethod(context, currentClass, methodName, methodBody, returnType,
+                                                                    capitalizedFieldName, newEntityFields, entityQualifiedName, fieldToTableDefMapping);
                             });
 
                     result.addElement(methodElement);
@@ -613,7 +619,7 @@ public class ServiceCompletionContributor extends CompletionContributor {
      */
     private void generateMethodCompletions(CompletionResultSet result, String methodPrefix, String fieldsPart,
                                          Map<String, FieldInfo> entityFields, Map<String, String> fieldToTableDefMapping,
-                                         String entityQualifiedName, PsiClass currentServiceClass, Project project) {
+                                         String entityQualifiedName, PsiClass currentServiceClass, Project project, PsiClass entityClass) {
 
         String simpleEntityName = StrUtil.subAfter(entityQualifiedName, ".", true);
 
@@ -633,7 +639,7 @@ public class ServiceCompletionContributor extends CompletionContributor {
         // 检查是否是实体名（如ActivitiModel或ActivitiModelLike）
         if (fieldParser.isEntityNamePattern(fieldsPart, simpleEntityName)) {
             System.out.println("  Detected entity name pattern, calling generateEntityMethodsForCompletion");
-            generateEntityMethodsForCompletion(result, methodPrefix, fieldsPart, simpleEntityName, entityFields, fieldToTableDefMapping, entityQualifiedName, currentServiceClass);
+            generateEntityMethodsForCompletion(result, methodPrefix, fieldsPart, simpleEntityName, entityFields, fieldToTableDefMapping, entityQualifiedName, currentServiceClass, entityClass);
             return;
         }
 
@@ -732,7 +738,8 @@ public class ServiceCompletionContributor extends CompletionContributor {
                     .withIcon(Icons.FLEX);
 
             // 统一使用接口+实现类生成逻辑
-            String entityMethodBodyLike = generateEntityMethodBody(queryPrefix, entityFields, fieldToTableDefMapping, simpleEntityName, entityClass, "like");
+            Map<String, ServiceMethodGenerator.FieldInfo> newEntityFieldsLike = convertEntityFieldsMap(entityFields);
+            String entityMethodBodyLike = bodyGenerator.generateEntityMethodBody(queryPrefix, newEntityFieldsLike, fieldToTableDefMapping, simpleEntityName, entityClass, "like");
             builderLike = builderLike.withTailText(" { generate in interface and implementation }", true)
                     .withInsertHandler((context, item) -> {
                         // 为整个实体方法创建特殊的字段映射
@@ -1432,7 +1439,7 @@ public class ServiceCompletionContributor extends CompletionContributor {
             Map<String, String> fieldToTableDefMapping = getFieldToTableDefMapping(entityQualifiedName, aptClass, project);
 
             // 根据方法名生成查询方法，但使用特殊的插入处理器来生成接口+实现
-            addServiceCallMethodNameBasedCompletion(result, serviceInterface, entityQualifiedName, project, aptClass, prefix, parameters, entityFields, fieldToTableDefMapping);
+            addServiceCallMethodNameBasedCompletion(result, serviceInterface, entityQualifiedName, project, aptClass, prefix, parameters, entityFields, fieldToTableDefMapping, entityClass);
 
         } catch (Exception e) {
             e.printStackTrace();
@@ -1446,13 +1453,13 @@ public class ServiceCompletionContributor extends CompletionContributor {
                                                        String entityQualifiedName, Project project, String aptClass,
                                                        String prefix, CompletionParameters parameters,
                                                        Map<String, FieldInfo> entityFields,
-                                                       Map<String, String> fieldToTableDefMapping) {
+                                                       Map<String, String> fieldToTableDefMapping, PsiClass entityClass) {
         try {
             // 解析方法名前缀
             String methodPrefix = extractMethodPrefix(prefix);
             if (StrUtil.isEmpty(methodPrefix)) {
                 // 如果没有完整的方法前缀，提供方法前缀补全
-                addServiceCallMethodPrefixCompletions(result, serviceInterface, prefix, entityFields, fieldToTableDefMapping, entityQualifiedName);
+                addServiceCallMethodPrefixCompletions(result, serviceInterface, prefix, entityFields, fieldToTableDefMapping, entityQualifiedName, entityClass);
                 return;
             }
 
@@ -1465,7 +1472,7 @@ public class ServiceCompletionContributor extends CompletionContributor {
             }
 
             // 生成可能的方法补全
-            generateServiceCallMethodCompletions(result, serviceInterface, methodPrefix, fieldsPart, entityFields, fieldToTableDefMapping, entityQualifiedName, project);
+            generateServiceCallMethodCompletions(result, serviceInterface, methodPrefix, fieldsPart, entityFields, fieldToTableDefMapping, entityQualifiedName, project, entityClass);
 
         } catch (Exception e) {
             e.printStackTrace();
@@ -1551,7 +1558,7 @@ public class ServiceCompletionContributor extends CompletionContributor {
      */
     private void addServiceCallMethodPrefixCompletions(CompletionResultSet result, PsiClass serviceInterface,
                                                      String prefix, Map<String, FieldInfo> entityFields,
-                                                     Map<String, String> fieldToTableDefMapping, String entityQualifiedName) {
+                                                     Map<String, String> fieldToTableDefMapping, String entityQualifiedName, PsiClass entityClass) {
 
         String simpleEntityName = StrUtil.subAfter(entityQualifiedName, ".", true);
         String[] queryPrefixes = {"listBy", "findBy", "getBy", "countBy", "existsBy", "removeBy", "deleteBy"};
@@ -1563,7 +1570,7 @@ public class ServiceCompletionContributor extends CompletionContributor {
                 // 添加整个实体的方法补全（如listBy + 实体名）
                 if (queryPrefix.equals("listBy") || queryPrefix.equals("findBy")) {
                     // 生成两个版本：eq查询和like查询
-                    generateServiceCallEntityMethods(result, serviceInterface, queryPrefix, simpleEntityName, entityFields, fieldToTableDefMapping, entityQualifiedName);
+                    generateServiceCallEntityMethods(result, serviceInterface, queryPrefix, simpleEntityName, entityFields, fieldToTableDefMapping, entityQualifiedName, entityClass);
                 }
 
                 // 为每个字段生成方法补全
@@ -1607,7 +1614,7 @@ public class ServiceCompletionContributor extends CompletionContributor {
     private void generateServiceCallMethodCompletions(CompletionResultSet result, PsiClass serviceInterface,
                                                     String methodPrefix, String fieldsPart,
                                                     Map<String, FieldInfo> entityFields, Map<String, String> fieldToTableDefMapping,
-                                                    String entityQualifiedName, Project project) {
+                                                    String entityQualifiedName, Project project, PsiClass entityClass) {
 
         String simpleEntityName = StrUtil.subAfter(entityQualifiedName, ".", true);
 
@@ -1619,7 +1626,7 @@ public class ServiceCompletionContributor extends CompletionContributor {
 
         // 检查是否是实体名（如ActivitiModel或ActivitiModelLike）
         if (fieldParser.isEntityNamePattern(fieldsPart, simpleEntityName)) {
-            generateServiceCallEntityMethodForCompletion(result, serviceInterface, methodPrefix, fieldsPart, simpleEntityName, entityFields, fieldToTableDefMapping, entityQualifiedName);
+            generateServiceCallEntityMethodForCompletion(result, serviceInterface, methodPrefix, fieldsPart, simpleEntityName, entityFields, fieldToTableDefMapping, entityQualifiedName, entityClass);
             return;
         }
 
@@ -1701,14 +1708,14 @@ public class ServiceCompletionContributor extends CompletionContributor {
     private void generateServiceCallEntityMethods(CompletionResultSet result, PsiClass serviceInterface,
                                                 String queryPrefix, String simpleEntityName,
                                                 Map<String, FieldInfo> entityFields, Map<String, String> fieldToTableDefMapping,
-                                                String entityQualifiedName) {
+                                                String entityQualifiedName, PsiClass entityClass) {
 
         // 生成eq版本的实体方法
         String entityMethodName = queryPrefix + simpleEntityName;
         if (!methodExists(serviceInterface, entityMethodName)) {
             String entityMethodSignature = entityMethodName + "()";
             String returnType = getReturnTypeForMethodPrefix(queryPrefix, simpleEntityName);
-            String entityMethodBody = generateEntityMethodBody(queryPrefix, entityFields, fieldToTableDefMapping, simpleEntityName, null, "eq");
+            String entityMethodBody = generateEntityMethodBody(queryPrefix, entityFields, fieldToTableDefMapping, simpleEntityName, entityClass, "eq");
 
             LookupElement methodElement = LookupElementBuilder.create(entityMethodSignature)
                     .withPresentableText(entityMethodSignature)
@@ -1730,7 +1737,7 @@ public class ServiceCompletionContributor extends CompletionContributor {
         if (!methodExists(serviceInterface, entityMethodNameLike)) {
             String entityMethodSignatureLike = entityMethodNameLike + "()";
             String returnType = getReturnTypeForMethodPrefix(queryPrefix, simpleEntityName);
-            String entityMethodBodyLike = generateEntityMethodBody(queryPrefix, entityFields, fieldToTableDefMapping, simpleEntityName, null, "like");
+            String entityMethodBodyLike = generateEntityMethodBody(queryPrefix, entityFields, fieldToTableDefMapping, simpleEntityName, entityClass, "like");
 
             LookupElement methodElementLike = LookupElementBuilder.create(entityMethodSignatureLike)
                     .withPresentableText(entityMethodSignatureLike)
@@ -1754,7 +1761,7 @@ public class ServiceCompletionContributor extends CompletionContributor {
     private void generateServiceCallEntityMethodForCompletion(CompletionResultSet result, PsiClass serviceInterface,
                                                             String methodPrefix, String fieldsPart, String simpleEntityName,
                                                             Map<String, FieldInfo> entityFields, Map<String, String> fieldToTableDefMapping,
-                                                            String entityQualifiedName) {
+                                                            String entityQualifiedName, PsiClass entityClass) {
 
         boolean isLikeVersion = fieldsPart.endsWith("Like");
         String queryType = isLikeVersion ? "like" : "eq";
@@ -1767,7 +1774,7 @@ public class ServiceCompletionContributor extends CompletionContributor {
 
         String methodSignature = methodName + "()";
         String returnType = getReturnTypeForMethodPrefix(methodPrefix, simpleEntityName);
-        String methodBody = generateEntityMethodBody(methodPrefix, entityFields, fieldToTableDefMapping, simpleEntityName, null, queryType);
+        String methodBody = generateEntityMethodBody(methodPrefix, entityFields, fieldToTableDefMapping, simpleEntityName, entityClass, queryType);
 
         LookupElement methodElement = LookupElementBuilder.create(methodSignature)
                 .withPresentableText(methodSignature)
@@ -2056,7 +2063,7 @@ public class ServiceCompletionContributor extends CompletionContributor {
     private void generateEntityMethodsForCompletion(CompletionResultSet result, String methodPrefix, String fieldsPart,
                                                   String simpleEntityName, Map<String, FieldInfo> entityFields,
                                                   Map<String, String> fieldToTableDefMapping, String entityQualifiedName,
-                                                  PsiClass currentServiceClass) {
+                                                  PsiClass currentServiceClass, PsiClass entityClass) {
 
         System.out.println("generateEntityMethodsForCompletion called with:");
         System.out.println("  methodPrefix: " + methodPrefix);
@@ -2078,7 +2085,7 @@ public class ServiceCompletionContributor extends CompletionContributor {
 
         String methodSignature = methodName + "()";
         String returnType = getReturnTypeForMethodPrefix(methodPrefix, simpleEntityName);
-        String methodBody = generateEntityMethodBody(methodPrefix, entityFields, fieldToTableDefMapping, simpleEntityName, null, queryType);
+        String methodBody = generateEntityMethodBody(methodPrefix, entityFields, fieldToTableDefMapping, simpleEntityName, entityClass, queryType);
 
         LookupElement methodElement = LookupElementBuilder.create(methodSignature)
                 .withPresentableText(methodSignature)
@@ -2969,8 +2976,11 @@ public class ServiceCompletionContributor extends CompletionContributor {
                     String tableDefFieldName = findMatchingTableDefField(entityFieldName, tableDefFields);
                     if (tableDefFieldName != null) {
                         mapping.put(entityFieldName, tableDefFieldName);
+                        System.out.println("Mapped field: " + entityFieldName + " -> " + tableDefFieldName);
+                    } else {
+                        System.out.println("Warning: No TableDef field found for entity field: " + entityFieldName);
+                        // 如果在TableDef中找不到对应字段，则不添加到映射中，这样就不会生成查询条件
                     }
-                    // 如果在TableDef中找不到对应字段，则不添加到映射中，这样就不会生成查询条件
                 }
             }
         } catch (Exception e) {

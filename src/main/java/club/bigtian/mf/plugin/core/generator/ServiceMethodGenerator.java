@@ -21,9 +21,11 @@ import java.util.Map;
 public class ServiceMethodGenerator {
 
     private final ImportManager importManager;
+    private final MethodBodyGenerator bodyGenerator;
 
     public ServiceMethodGenerator() {
         this.importManager = new ImportManager();
+        this.bodyGenerator = new MethodBodyGenerator();
     }
 
     /**
@@ -330,6 +332,76 @@ public class ServiceMethodGenerator {
         } else {
             return "根据条件查询数据";
         }
+    }
+
+    /**
+     * 统一的方法生成入口 - 供所有类型的补全使用
+     *
+     * @param context 插入上下文
+     * @param currentClass 当前类（可能是Controller、Service接口或Service实现类）
+     * @param methodName 方法名
+     * @param methodBody 方法体
+     * @param returnType 返回类型
+     * @param fieldsCompletion 字段补全信息
+     * @param entityFields 实体字段信息
+     * @param entityQualifiedName 实体类全限定名
+     * @param fieldToTableDefMapping 字段到TableDef的映射
+     */
+    public void generateUnifiedMethod(InsertionContext context, PsiClass currentClass,
+                                    String methodName, String methodBody, String returnType,
+                                    String fieldsCompletion, Map<String, FieldInfo> entityFields,
+                                    String entityQualifiedName, Map<String, String> fieldToTableDefMapping) {
+
+        if (currentClass == null) {
+            return;
+        }
+
+        if (currentClass.isInterface()) {
+            // 如果是接口（Service接口），生成接口声明 + 实现类方法
+            generateServiceMethodInInterfaceAndImpl(context, currentClass, methodName, methodBody, returnType,
+                                                  fieldsCompletion, entityFields, entityQualifiedName, fieldToTableDefMapping);
+        } else {
+            // 如果是实现类（Service实现类或Controller），只生成方法实现
+            generateSingleMethodImplementation(context, currentClass, methodName, methodBody, returnType,
+                                             fieldsCompletion, entityFields, entityQualifiedName, fieldToTableDefMapping);
+        }
+    }
+
+    /**
+     * 生成单个方法实现（用于Service实现类或Controller）
+     */
+    private void generateSingleMethodImplementation(InsertionContext context, PsiClass targetClass,
+                                                  String methodName, String methodBody, String returnType,
+                                                  String fieldsCompletion, Map<String, FieldInfo> entityFields,
+                                                  String entityQualifiedName, Map<String, String> fieldToTableDefMapping) {
+
+        ApplicationManager.getApplication().runWriteAction(() -> {
+            try {
+                Project project = context.getProject();
+                PsiElementFactory factory = JavaPsiFacade.getElementFactory(project);
+
+                // 生成参数列表
+                String parameters = generateParameters(fieldsCompletion, entityFields, entityQualifiedName, fieldToTableDefMapping);
+
+                // 生成方法实现
+                String methodText = "/**\n     * " + bodyGenerator.generateMethodDescription(methodName) + "\n     */\n" +
+                                  "public " + returnType + " " + methodName + "(" + parameters + ") {\n" +
+                                  "    " + methodBody.replace("\n", "\n    ") + "\n" +
+                                  "}";
+
+                PsiMethod method = factory.createMethodFromText(methodText, targetClass);
+
+                // 插入方法
+                targetClass.add(method);
+
+                // 添加必要的导入语句
+                importManager.addRequiredImportsToFile(targetClass.getContainingFile(), methodBody, project);
+
+            } catch (Exception e) {
+                System.err.println("Error generating single method implementation: " + e.getMessage());
+                e.printStackTrace();
+            }
+        });
     }
 
     /**

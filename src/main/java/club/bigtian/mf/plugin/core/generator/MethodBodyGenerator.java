@@ -89,13 +89,25 @@ public class MethodBodyGenerator {
                 }
             }
         } else {
-            // 如果没有实体类，使用传入的字段顺序
-            orderedFields.addAll(entityFields.values());
+            // 如果没有实体类，使用传入的字段顺序，但只包含有TableDef映射的字段
+            for (ServiceMethodGenerator.FieldInfo fieldInfo : entityFields.values()) {
+                String tableDefField = fieldToTableDefMapping.get(fieldInfo.fieldName);
+                if (tableDefField != null) {
+                    orderedFields.add(fieldInfo);
+                }
+            }
         }
 
         boolean isFirst = true;
         for (ServiceMethodGenerator.FieldInfo fieldInfo : orderedFields) {
             String tableDefField = fieldToTableDefMapping.get(fieldInfo.fieldName);
+
+            // orderedFields 中的字段已经保证有 TableDef 映射，但为了安全起见还是检查一下
+            if (StrUtil.isEmpty(tableDefField)) {
+                System.out.println("Warning: No TableDef mapping found for field: " + fieldInfo.fieldName + ", skipping...");
+                continue;
+            }
+
             String fullFieldReference = tableDefInstanceName + "." + tableDefField;
             String entityFieldAccess = StrUtil.lowerFirst(simpleEntityName) + ".get" + StrUtil.upperFirst(fieldInfo.fieldName) + "()";
 
