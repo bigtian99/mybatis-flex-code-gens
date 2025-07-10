@@ -875,6 +875,8 @@ public class ServiceCompletionContributor extends CompletionContributor {
     }
 
 
+
+
     /**
      * 从方法名生成参数列表
      */
@@ -1593,9 +1595,11 @@ public class ServiceCompletionContributor extends CompletionContributor {
                         continue; // 跳过已存在的方法
                     }
 
-                    String methodSignature = methodName + "()";
                     String methodBody = bodyGenerator.generateSingleFieldMethodBody(queryPrefix, convertToNewFieldInfo(fieldInfo), fieldToTableDefMapping, simpleEntityName);
                     String returnType = getReturnTypeForMethodPrefix(queryPrefix, simpleEntityName);
+
+                    // 使用统一的方法生成逻辑，先生成一个临时签名用于显示
+                    String methodSignature = methodName + "()";
 
                     LookupElement methodElement = LookupElementBuilder.create(methodSignature)
                             .withPresentableText(methodSignature)
@@ -1603,8 +1607,13 @@ public class ServiceCompletionContributor extends CompletionContributor {
                             .withTailText(" { generate in interface and implementation }", true)
                             .withIcon(Icons.FLEX)
                             .withInsertHandler((context, item) -> {
-                                generateServiceMethodInInterfaceAndImpl(context, serviceInterface, methodName, methodBody, returnType,
-                                                                       capitalizedFieldName, entityFields, entityQualifiedName, fieldToTableDefMapping);
+                                // 使用统一的方法生成逻辑
+                                PsiElement element = context.getFile().findElementAt(context.getStartOffset());
+                                PsiClass currentClass = PsiTreeUtil.getParentOfType(element, PsiClass.class);
+                                Map<String, ServiceMethodGenerator.FieldInfo> newEntityFields = new HashMap<>();
+                                newEntityFields.put(fieldInfo.fieldName, convertToNewFieldInfo(fieldInfo));
+                                methodGenerator.generateUnifiedMethod(context, currentClass, methodName, methodBody, returnType,
+                                                                    capitalizedFieldName, newEntityFields, entityQualifiedName, fieldToTableDefMapping);
                             });
 
                     result.addElement(methodElement);
@@ -1646,10 +1655,11 @@ public class ServiceCompletionContributor extends CompletionContributor {
                 continue; // 跳过已存在的方法
             }
 
-            // 生成空的方法签名，不包含参数
-            String methodSignature = fullMethodName + "()";
             String methodBody = generateMethodBody(methodPrefix, completion, fieldToTableDefMapping, simpleEntityName, project);
             String returnType = getReturnTypeForMethodPrefix(methodPrefix, simpleEntityName);
+
+            // 使用统一的方法生成逻辑，先生成一个临时签名用于显示
+            String methodSignature = fullMethodName + "()";
 
             LookupElement methodElement = LookupElementBuilder.create(methodSignature)
                     .withPresentableText(methodSignature)
@@ -1657,8 +1667,12 @@ public class ServiceCompletionContributor extends CompletionContributor {
                     .withTailText(" { generate in interface and implementation }", true)
                     .withIcon(Icons.FLEX)
                     .withInsertHandler((context, item) -> {
-                        generateServiceMethodInInterfaceAndImpl(context, serviceInterface, fullMethodName, methodBody, returnType,
-                                                               completion, entityFields, entityQualifiedName, fieldToTableDefMapping);
+                        // 使用统一的方法生成逻辑
+                        PsiElement element = context.getFile().findElementAt(context.getStartOffset());
+                        PsiClass currentClass = PsiTreeUtil.getParentOfType(element, PsiClass.class);
+                        Map<String, ServiceMethodGenerator.FieldInfo> newEntityFields = convertEntityFieldsMap(entityFields);
+                        methodGenerator.generateUnifiedMethod(context, currentClass, fullMethodName, methodBody, returnType,
+                                                             completion, newEntityFields, entityQualifiedName, fieldToTableDefMapping);
                     });
 
             result.addElement(methodElement);
@@ -1777,9 +1791,16 @@ public class ServiceCompletionContributor extends CompletionContributor {
             return; // 跳过已存在的方法
         }
 
-        String methodSignature = methodName + "()";
         String returnType = getReturnTypeForMethodPrefix(methodPrefix, simpleEntityName);
         String methodBody = generateEntityMethodBody(methodPrefix, entityFields, fieldToTableDefMapping, simpleEntityName, entityClass, queryType);
+
+        // 为整个实体方法创建特殊的字段映射
+        Map<String, FieldInfo> entityMethodFields = new HashMap<>();
+        entityMethodFields.put("entity", new FieldInfo("entity", simpleEntityName, "entity"));
+        String fieldsCompletion = isLikeVersion ? "EntityLike" : "Entity";
+
+        // 使用统一的方法生成逻辑，先生成一个临时签名用于显示
+        String methodSignature = methodName + "()";
 
         LookupElement methodElement = LookupElementBuilder.create(methodSignature)
                 .withPresentableText(methodSignature)
@@ -1787,13 +1808,13 @@ public class ServiceCompletionContributor extends CompletionContributor {
                 .withTailText(" { generate in interface and implementation }", true)
                 .withIcon(Icons.FLEX)
                 .withInsertHandler((context, item) -> {
-                    // 为整个实体方法创建特殊的字段映射
-                    Map<String, FieldInfo> entityMethodFields = new HashMap<>();
-                    entityMethodFields.put("entity", new FieldInfo("entity", simpleEntityName, "entity"));
-
-                    String fieldsCompletion = isLikeVersion ? "EntityLike" : "Entity";
-                    generateServiceMethodInInterfaceAndImpl(context, serviceInterface, methodName, methodBody, returnType,
-                                                           fieldsCompletion, entityMethodFields, entityQualifiedName, fieldToTableDefMapping);
+                    // 使用统一的方法生成逻辑
+                    PsiElement element = context.getFile().findElementAt(context.getStartOffset());
+                    PsiClass currentClass = PsiTreeUtil.getParentOfType(element, PsiClass.class);
+                    Map<String, ServiceMethodGenerator.FieldInfo> newEntityFields = new HashMap<>();
+                    newEntityFields.put("entity", new ServiceMethodGenerator.FieldInfo("entity", simpleEntityName, "entity"));
+                    methodGenerator.generateUnifiedMethod(context, currentClass, methodName, methodBody, returnType,
+                                                         fieldsCompletion, newEntityFields, entityQualifiedName, fieldToTableDefMapping);
                 });
 
         result.addElement(methodElement);
@@ -2304,7 +2325,9 @@ public class ServiceCompletionContributor extends CompletionContributor {
                         // 只生成同时存在于实体类和APT中的字段参数
                         if (fieldInfo != null && fieldToTableDefMapping.containsKey(field)) {
                             if (!firstParam) paramBuilder.append(", ");
-                            paramBuilder.append(fieldInfo.fieldType).append(" ").append(fieldInfo.fieldName);
+                            // 使用字段名的小写形式作为参数名
+                            String paramName = StrUtil.lowerFirst(field);
+                            paramBuilder.append(fieldInfo.fieldType).append(" ").append(paramName);
                             firstParam = false;
                         }
                     }
@@ -2981,7 +3004,6 @@ public class ServiceCompletionContributor extends CompletionContributor {
                     String tableDefFieldName = findMatchingTableDefField(entityFieldName, tableDefFields);
                     if (tableDefFieldName != null) {
                         mapping.put(entityFieldName, tableDefFieldName);
-                        System.out.println("Mapped field: " + entityFieldName + " -> " + tableDefFieldName);
                     } else {
                         System.out.println("Warning: No TableDef field found for entity field: " + entityFieldName);
                         // 如果在TableDef中找不到对应字段，则不添加到映射中，这样就不会生成查询条件

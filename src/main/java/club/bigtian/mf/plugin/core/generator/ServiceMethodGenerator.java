@@ -9,6 +9,7 @@ import com.intellij.psi.*;
 import com.intellij.psi.javadoc.PsiDocComment;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.search.searches.ClassInheritorsSearch;
+import com.intellij.psi.util.PsiTreeUtil;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -55,11 +56,11 @@ public class ServiceMethodGenerator {
                 // 确保文档已提交
                 PsiDocumentManager.getInstance(project).commitAllDocuments();
 
-                // 1. 先替换用户输入为方法调用，避免影响接口方法声明的添加
-                replaceUserInput(context, methodName);
-
-                // 2. 生成参数列表
+                // 1. 生成参数列表
                 String parameters = generateParameters(fieldsCompletion, entityFields, entityQualifiedName, fieldToTableDefMapping);
+
+                // 2. 先替换用户输入为方法调用，避免影响接口方法声明的添加
+                replaceUserInput(context, methodName, parameters, returnType, fieldsCompletion);
 
                 // 3. 在接口中生成方法声明
                 generateInterfaceMethod(serviceInterface, methodName, returnType, parameters, fieldsCompletion, entityFields, entityQualifiedName, project);
@@ -80,12 +81,40 @@ public class ServiceMethodGenerator {
     /**
      * 替换用户输入
      */
-    private void replaceUserInput(InsertionContext context, String methodName) {
+    private void replaceUserInput(InsertionContext context, String methodName, String parameters, String returnType, String fieldsCompletion) {
         com.intellij.openapi.editor.Document document = context.getDocument();
         int startOffset = context.getStartOffset();
         int tailOffset = context.getTailOffset();
 
-        String userInputReplacement = methodName + "()";
+        // 检查当前类是否是接口
+        PsiElement element = context.getFile().findElementAt(context.getStartOffset());
+        PsiClass currentClass = PsiTreeUtil.getParentOfType(element, PsiClass.class);
+
+        String userInputReplacement;
+        if (currentClass != null && currentClass.isInterface()) {
+            // 对于接口，生成完整的方法声明
+            String description = bodyGenerator.generateMethodDescription(methodName);
+            userInputReplacement = "/**\n     * " + description + "\n     */\n    " +
+                                 returnType + " " + methodName + "(" + parameters + ");";
+        } else {
+            // 对于实现类或Controller，生成方法调用
+            if (StrUtil.isNotEmpty(parameters)) {
+                // 生成参数占位符
+                String[] paramArray = parameters.split(",");
+                StringBuilder paramPlaceholders = new StringBuilder();
+                for (int i = 0; i < paramArray.length; i++) {
+                    if (i > 0) paramPlaceholders.append(", ");
+                    // 提取参数名（去掉类型）
+                    String param = paramArray[i].trim();
+                    String paramName = param.substring(param.lastIndexOf(" ") + 1);
+                    paramPlaceholders.append(paramName);
+                }
+                userInputReplacement = methodName + "(" + paramPlaceholders.toString() + ")";
+            } else {
+                userInputReplacement = methodName + "()";
+            }
+        }
+
         document.replaceString(startOffset, tailOffset, userInputReplacement);
 
         // 提交文档更改，确保PSI同步
@@ -111,7 +140,9 @@ public class ServiceMethodGenerator {
                 FieldInfo fieldInfo = entityFields.get(field);
                 if (fieldInfo != null && fieldToTableDefMapping.containsKey(field)) {
                     if (!firstParam) paramBuilder.append(", ");
-                    paramBuilder.append(fieldInfo.fieldType).append(" ").append(fieldInfo.fieldName);
+                    // 使用字段名的小写形式作为参数名
+                    String paramName = StrUtil.lowerFirst(field);
+                    paramBuilder.append(fieldInfo.fieldType).append(" ").append(paramName);
                     firstParam = false;
                 }
             }
