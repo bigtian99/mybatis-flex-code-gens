@@ -797,7 +797,7 @@ public class ServiceCompletionContributor extends CompletionContributor {
                 // 在接口中，只显示方法签名，不显示方法体
                 builder = builder.withTailText(" (generate method declaration)", true)
                         .withInsertHandler((context, item) -> {
-                            insertInterfaceMethodDeclaration(context, methodName, returnType);
+                            insertInterfaceMethodDeclaration(context, methodName, returnType, entityFields);
                         });
             } else {
                 // 在实现类中，显示方法体
@@ -823,7 +823,7 @@ public class ServiceCompletionContributor extends CompletionContributor {
     /**
      * 在接口中插入方法声明，并在实现类中生成方法实现
      */
-    private void insertInterfaceMethodDeclaration(InsertionContext context, String methodName, String returnType) {
+    private void insertInterfaceMethodDeclaration(InsertionContext context, String methodName, String returnType, Map<String, FieldInfo> entityFields) {
         ApplicationManager.getApplication().executeOnPooledThread(() -> {
             try {
                 Project project = context.getProject();
@@ -840,8 +840,8 @@ public class ServiceCompletionContributor extends CompletionContributor {
                                 try {
                                     PsiElementFactory factory = JavaPsiFacade.getElementFactory(project);
 
-                                    // 解析方法名生成参数
-                                    String parameters = generateMethodParametersFromName(methodName);
+                                    // 解析方法名生成参数（使用实体字段信息）
+                                    String parameters = generateMethodParametersFromName(methodName, entityFields);
 
                                     // 生成接口方法声明
                                     String methodText = "/**\n     * " + bodyGenerator.generateMethodDescription(methodName) + "\n     */\n    " +
@@ -886,7 +886,7 @@ public class ServiceCompletionContributor extends CompletionContributor {
     /**
      * 从方法名生成参数列表
      */
-    private String generateMethodParametersFromName(String methodName) {
+    private String generateMethodParametersFromName(String methodName, Map<String, FieldInfo> entityFields) {
         try {
             // 提取方法前缀
             String methodPrefix = extractMethodPrefixFromMethodName(methodName);
@@ -906,7 +906,7 @@ public class ServiceCompletionContributor extends CompletionContributor {
             // 生成参数列表
             List<String> parameters = new ArrayList<>();
             for (String fieldName : fieldNames) {
-                String paramType = getParameterTypeFromFieldName(fieldName);
+                String paramType = getParameterTypeFromFieldName(fieldName, entityFields);
                 String paramName = StrUtil.lowerFirst(fieldName);
                 parameters.add(paramType + " " + paramName);
             }
@@ -916,6 +916,13 @@ public class ServiceCompletionContributor extends CompletionContributor {
         } catch (Exception e) {
             return "";
         }
+    }
+
+    /**
+     * 从方法名生成参数列表（不带实体字段信息的重载方法，用于向后兼容）
+     */
+    private String generateMethodParametersFromName(String methodName) {
+        return generateMethodParametersFromName(methodName, null);
     }
 
     /**
@@ -966,9 +973,19 @@ public class ServiceCompletionContributor extends CompletionContributor {
      * 根据字段名从实体字段信息中获取实际的参数类型
      */
     private String getParameterTypeFromFieldName(String fieldName, Map<String, FieldInfo> entityFields) {
-        if (entityFields != null && entityFields.containsKey(fieldName)) {
-            FieldInfo fieldInfo = entityFields.get(fieldName);
-            return fieldInfo.fieldType;
+        if (entityFields != null) {
+            // 首先尝试直接匹配
+            if (entityFields.containsKey(fieldName)) {
+                FieldInfo fieldInfo = entityFields.get(fieldName);
+                return fieldInfo.fieldType;
+            }
+
+            // 如果直接匹配失败，尝试小写首字母的版本
+            String lowerFirstFieldName = StrUtil.lowerFirst(fieldName);
+            if (entityFields.containsKey(lowerFirstFieldName)) {
+                FieldInfo fieldInfo = entityFields.get(lowerFirstFieldName);
+                return fieldInfo.fieldType;
+            }
         }
 
         // 如果找不到字段信息，使用默认的类型推断作为后备方案
@@ -1686,11 +1703,9 @@ public class ServiceCompletionContributor extends CompletionContributor {
                     .withTailText(" { generate in interface and implementation }", true)
                     .withIcon(Icons.FLEX)
                     .withInsertHandler((context, item) -> {
-                        // 使用统一的方法生成逻辑
-                        PsiElement element = context.getFile().findElementAt(context.getStartOffset());
-                        PsiClass currentClass = PsiTreeUtil.getParentOfType(element, PsiClass.class);
+                        // 对于Service方法调用，应该在Service接口和实现类中生成方法
                         Map<String, ServiceMethodGenerator.FieldInfo> newEntityFields = convertEntityFieldsMap(entityFields);
-                        methodGenerator.generateUnifiedMethod(context, currentClass, fullMethodName, methodBody, returnType,
+                        methodGenerator.generateServiceMethodInInterfaceAndImpl(context, serviceInterface, fullMethodName, methodBody, returnType,
                                                              completion, newEntityFields, entityQualifiedName, fieldToTableDefMapping);
                     });
 
@@ -2113,17 +2128,11 @@ public class ServiceCompletionContributor extends CompletionContributor {
                                                   Map<String, String> fieldToTableDefMapping, String entityQualifiedName,
                                                   PsiClass currentServiceClass, PsiClass entityClass) {
 
-        System.out.println("generateEntityMethodsForCompletion called with:");
-        System.out.println("  methodPrefix: " + methodPrefix);
-        System.out.println("  fieldsPart: " + fieldsPart);
-        System.out.println("  simpleEntityName: " + simpleEntityName);
 
         boolean isLikeVersion = fieldsPart.endsWith("Like");
         String queryType = isLikeVersion ? "like" : "eq";
         String methodName = methodPrefix + fieldsPart;
 
-        System.out.println("  methodName: " + methodName);
-        System.out.println("  currentServiceClass: " + (currentServiceClass != null ? currentServiceClass.getName() : "null"));
 
         // 检查方法是否已存在
         if (currentServiceClass != null && methodExists(currentServiceClass, methodName)) {
@@ -2307,139 +2316,6 @@ public class ServiceCompletionContributor extends CompletionContributor {
     }
 
 
-    /**
-     * 插入方法实现，光标聚焦到用户输入行的括号内
-     */
-    private void insertMethodImplementationWithCursor(com.intellij.codeInsight.completion.InsertionContext context,
-                                                    String methodName, String methodBody, String returnType,
-                                                    String fieldsCompletion, Map<String, FieldInfo> entityFields,
-                                                    String entityQualifiedName, Map<String, String> fieldToTableDefMapping) {
-
-        ApplicationManager.getApplication().runWriteAction(() -> {
-            try {
-                // 获取当前文档和编辑器
-                com.intellij.openapi.editor.Document document = context.getDocument();
-                com.intellij.openapi.editor.Editor editor = context.getEditor();
-                Project project = context.getProject();
-
-                // 确保文档已提交
-                PsiDocumentManager.getInstance(project).commitAllDocuments();
-
-                // 获取当前光标位置
-                int startOffset = context.getStartOffset();
-                int tailOffset = context.getTailOffset();
-
-                // 获取当前类，判断是接口还是实现类
-                PsiFile psiFile = context.getFile();
-                PsiElement elementAtCaret = psiFile.findElementAt(startOffset);
-                PsiClass currentClass = PsiTreeUtil.getParentOfType(elementAtCaret, PsiClass.class);
-                boolean isInterface = currentClass != null && currentClass.isInterface();
-
-                // 解析字段并生成参数列表
-                StringBuilder paramBuilder = new StringBuilder();
-
-                // 检查是否是整个实体方法（通过fieldsCompletion判断）
-                if ("Entity".equals(fieldsCompletion) || "EntityLike".equals(fieldsCompletion)) {
-                    // 整个实体方法，需要实体参数
-                    String simpleEntityName = StrUtil.subAfter(entityQualifiedName, ".", true);
-                    paramBuilder.append(simpleEntityName).append(" ").append(StrUtil.lowerFirst(simpleEntityName));
-                } else {
-                    // 普通字段方法，解析字段生成参数
-                    List<String> fields = parseFieldsFromCompletion(fieldsCompletion);
-                    boolean firstParam = true;
-                    for (String field : fields) {
-                        FieldInfo fieldInfo = entityFields.get(field);
-                        // 只生成同时存在于实体类和APT中的字段参数
-                        if (fieldInfo != null && fieldToTableDefMapping.containsKey(field)) {
-                            if (!firstParam) paramBuilder.append(", ");
-                            // 使用字段名的小写形式作为参数名
-                            String paramName = StrUtil.lowerFirst(field);
-                            paramBuilder.append(fieldInfo.fieldType).append(" ").append(paramName);
-                            firstParam = false;
-                        }
-                    }
-                }
-
-                if (isInterface) {
-                    // 在接口中，使用PSI操作生成完整的方法声明
-
-                    // 先替换用户输入为方法名和空括号
-                    String userInputReplacement = methodName + "()";
-                    document.replaceString(startOffset, tailOffset, userInputReplacement);
-
-                    // 计算光标在括号内的位置
-                    int cursorPosition = startOffset + methodName.length() + 1;
-
-                    // 提交文档更改，确保PSI同步
-                    PsiDocumentManager.getInstance(project).commitDocument(document);
-
-                    // 使用PSI操作在接口中生成完整的方法声明
-                    PsiElementFactory factory = JavaPsiFacade.getElementFactory(project);
-
-                    // 找到插入位置
-                    PsiElement elementAtNewCaret = psiFile.findElementAt(startOffset);
-                    int insertOffset = findInsertPosition(elementAtNewCaret, document);
-
-                    // 创建纯粹的方法声明
-                    String methodDeclaration = returnType + " " + methodName + "(" + paramBuilder.toString() + ");";
-                    PsiMethod interfaceMethod = factory.createMethodFromText(methodDeclaration, currentClass);
-
-                    // 在接口中插入方法
-                    PsiMethod addedMethod = (PsiMethod) currentClass.add(interfaceMethod);
-
-                    // 添加JavaDoc注释
-                    addJavaDocToMethod(addedMethod, methodName, fieldsCompletion, entityFields, entityQualifiedName, factory);
-
-                    // 同时在实现类中生成方法实现
-                    Map<String, ServiceMethodGenerator.FieldInfo> newEntityFields = convertEntityFieldsMap(entityFields);
-                    methodGenerator.generateImplementationMethodAsync(context.getProject(), currentClass, methodName, returnType,
-                                                    paramBuilder.toString(), methodBody, fieldsCompletion, newEntityFields, entityQualifiedName);
-
-                    // 将光标定位到用户输入的括号内
-                    editor.getCaretModel().moveToOffset(cursorPosition);
-                } else {
-                    // 在实现类中，找到合适的插入位置生成完整的方法实现
-                    int insertOffset = findInsertPosition(elementAtCaret, document);
-
-                    // 替换用户输入的内容为方法名和空括号
-                    String userInputReplacement = methodName + "()";
-                    document.replaceString(startOffset, tailOffset, userInputReplacement);
-
-                    // 计算光标在括号内的位置（在替换后）
-                    int cursorPosition = startOffset + methodName.length() + 1; // +1 for opening parenthesis
-
-                    // 生成方法注释
-                    String methodComment = generateMethodComment(methodName, fieldsCompletion, entityFields, entityQualifiedName);
-
-                    // 生成完整的方法实现
-                    StringBuilder methodCode = new StringBuilder();
-                    methodCode.append("\n\n");
-                    methodCode.append(methodComment);
-                    methodCode.append("    public ").append(returnType).append(" ").append(methodName).append("(");
-                    methodCode.append(paramBuilder.toString()).append(") {\n");
-
-                    // 直接使用方法体，保持原有缩进
-                    methodCode.append("        ").append(methodBody.replace("\n", "\n        ")).append("\n");
-
-                    methodCode.append("    }");
-
-                    // 插入完整的方法到合适位置
-                    document.insertString(insertOffset, methodCode.toString());
-
-                    // 添加必要的导入
-                    addRequiredImports(context, methodBody);
-
-                    // 将光标定位到用户输入行的括号内
-                    editor.getCaretModel().moveToOffset(cursorPosition);
-                }
-
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
-        });
-    }
-
-    // generateImplementationMethodAsync 方法已迁移到 ServiceMethodGenerator 类中
 
     /**
      * 为方法添加JavaDoc注释

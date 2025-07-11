@@ -110,7 +110,7 @@ public class ServiceMethodGenerator {
     /**
      * 生成参数列表
      */
-    private String generateParameters(String fieldsCompletion, Map<String, FieldInfo> entityFields, 
+    private String generateParameters(String fieldsCompletion, Map<String, FieldInfo> entityFields,
                                     String entityQualifiedName, Map<String, String> fieldToTableDefMapping) {
         StringBuilder paramBuilder = new StringBuilder();
 
@@ -124,12 +124,16 @@ public class ServiceMethodGenerator {
             boolean firstParam = true;
             for (String field : fields) {
                 FieldInfo fieldInfo = entityFields.get(field);
-                if (fieldInfo != null && fieldToTableDefMapping.containsKey(field)) {
+                if (fieldInfo != null) {
+                    // 对于单字段方法，如果字段信息存在就生成参数
+                    // fieldToTableDefMapping的检查已经在调用方进行过了
                     if (!firstParam) paramBuilder.append(", ");
                     // 使用字段名的小写形式作为参数名
                     String paramName = StrUtil.lowerFirst(field);
                     paramBuilder.append(fieldInfo.fieldType).append(" ").append(paramName);
                     firstParam = false;
+                } else {
+                    System.out.println("Warning: No field info found for field: " + field + " in generateParameters");
                 }
             }
         }
@@ -161,11 +165,6 @@ public class ServiceMethodGenerator {
 
             // 添加方法到接口
             PsiMethod addedMethod = (PsiMethod) serviceInterface.add(interfaceMethod);
-
-            System.out.println("Successfully added method to interface: " + addedMethod.getName());
-            System.out.println("Interface method text: " + addedMethod.getText());
-            System.out.println("Interface class: " + serviceInterface.getName());
-            System.out.println("Interface file: " + serviceInterface.getContainingFile().getName());
 
             // 添加JavaDoc注释到接口方法
             try {
