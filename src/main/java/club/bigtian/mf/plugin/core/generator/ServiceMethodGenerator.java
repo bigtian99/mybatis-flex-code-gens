@@ -124,6 +124,13 @@ public class ServiceMethodGenerator {
             boolean firstParam = true;
             for (String field : fields) {
                 FieldInfo fieldInfo = entityFields.get(field);
+
+                // 如果直接匹配失败，尝试小写首字母的版本
+                if (fieldInfo == null) {
+                    String lowerFirstField = StrUtil.lowerFirst(field);
+                    fieldInfo = entityFields.get(lowerFirstField);
+                }
+
                 if (fieldInfo != null) {
                     // 对于单字段方法，如果字段信息存在就生成参数
                     // fieldToTableDefMapping的检查已经在调用方进行过了
@@ -132,8 +139,6 @@ public class ServiceMethodGenerator {
                     String paramName = StrUtil.lowerFirst(field);
                     paramBuilder.append(fieldInfo.fieldType).append(" ").append(paramName);
                     firstParam = false;
-                } else {
-                    System.out.println("Warning: No field info found for field: " + field + " in generateParameters");
                 }
             }
         }
