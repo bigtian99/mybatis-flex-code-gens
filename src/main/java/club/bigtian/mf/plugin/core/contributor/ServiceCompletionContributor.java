@@ -601,8 +601,9 @@ public class ServiceCompletionContributor extends CompletionContributor {
                 continue; // 跳过已存在的方法
             }
 
-            // 生成空的方法签名，不包含参数
-            String methodSignature = fullMethodName + "()";
+            // 生成包含参数的方法签名
+            String methodParameters = generateMethodParametersFromName(fullMethodName, entityFields);
+            String methodSignature = fullMethodName + "(" + methodParameters + ")";
             String methodBody = generateMethodBody(methodPrefix, completion, fieldToTableDefMapping, simpleEntityName, project);
             String returnType = getReturnTypeForMethodPrefix(methodPrefix, simpleEntityName);
 
@@ -899,7 +900,10 @@ public class ServiceCompletionContributor extends CompletionContributor {
      */
     private String removeQueryTypeSuffix(String fieldPart) {
         // 常见的查询类型后缀
-        String[] suffixes = {"Like", "Gt", "Lt", "Ge", "Le", "Ne", "In", "NotIn", "Between", "NotBetween", "IsNull", "IsNotNull"};
+        String[] suffixes = {"LikeLeft", "LikeRight", "NotLikeLeft", "NotLikeRight", "NotLike", "Like",
+                           "GreaterThanEqual", "LessThanEqual", "GreaterThan", "LessThan", "NotEqual",
+                           "Gt", "Lt", "Ge", "Le", "Ne", "Eq", "In", "NotIn", "Between", "NotBetween",
+                           "IsNull", "IsNotNull"};
 
         for (String suffix : suffixes) {
             if (fieldPart.endsWith(suffix)) {
@@ -1081,13 +1085,14 @@ public class ServiceCompletionContributor extends CompletionContributor {
             StringBuilder methodBody = new StringBuilder();
             methodBody.append("        QueryWrapper queryWrapper = QueryWrapper.create()");
 
-            // 简单解析第一个字段（可以后续优化为更复杂的解析）
+            // 解析第一个字段和查询类型
             if (StrUtil.isNotEmpty(fieldsPart)) {
                 String firstField = extractFirstField(fieldsPart);
+                String queryType = extractQueryTypeFromFieldsPart(fieldsPart);
                 String tableDefField = StrUtil.toUnderlineCase(firstField).toUpperCase();
                 String paramName = StrUtil.lowerFirst(firstField);
 
-                methodBody.append("\n                .where(").append(tableDefInstanceName).append(".").append(tableDefField).append(".eq(").append(paramName).append("));");
+                methodBody.append("\n                .where(").append(tableDefInstanceName).append(".").append(tableDefField).append(".").append(queryType).append("(").append(paramName).append("));");
             } else {
                 methodBody.append(";");
             }
@@ -1102,11 +1107,34 @@ public class ServiceCompletionContributor extends CompletionContributor {
     }
 
     /**
+     * 从字段部分提取查询类型
+     */
+    private String extractQueryTypeFromFieldsPart(String fieldsPart) {
+        // 获取查询方法映射
+        Map<String, String> queryMethods = getQueryColumnMethods(null);
+
+        // 检查是否有查询类型后缀
+        for (Map.Entry<String, String> entry : queryMethods.entrySet()) {
+            String suffix = entry.getKey();
+            String methodName = entry.getValue();
+            if (fieldsPart.endsWith(suffix)) {
+                return methodName;
+            }
+        }
+
+        // 默认使用 eq
+        return "eq";
+    }
+
+    /**
      * 提取第一个字段名
      */
     private String extractFirstField(String fieldsPart) {
         // 移除查询类型后缀
-        String[] suffixes = {"Like", "Gt", "Lt", "Ge", "Le", "Ne", "In", "NotIn", "Between", "NotBetween", "IsNull", "IsNotNull"};
+        String[] suffixes = {"LikeLeft", "LikeRight", "NotLikeLeft", "NotLikeRight", "NotLike", "Like",
+                           "GreaterThanEqual", "LessThanEqual", "GreaterThan", "LessThan", "NotEqual",
+                           "Gt", "Lt", "Ge", "Le", "Ne", "Eq", "In", "NotIn", "Between", "NotBetween",
+                           "IsNull", "IsNotNull"};
         String fieldName = fieldsPart;
 
         for (String suffix : suffixes) {
@@ -1143,8 +1171,10 @@ public class ServiceCompletionContributor extends CompletionContributor {
 
         // 检查是否以QueryColumn方法结尾，如果是，则可以直接作为完整方法名
         if (endsWithQueryColumnMethod(fieldsPart, entityFields, project)) {
-            // 方法名已经完整，但仍然可以继续添加And/Or连接符
-            // 检查是否可以添加And/Or
+            // 方法名已经完整，添加完整方法选项
+            completions.add(fieldsPart);
+
+            // 但仍然可以继续添加And/Or连接符
             addAndOrCompletions(completions, fieldsPart, entityFields, usedFields, queryMethods);
             return completions;
         }
@@ -1194,6 +1224,11 @@ public class ServiceCompletionContributor extends CompletionContributor {
                         // 单字段（默认eq查询）
                         completions.add(capitalizedFieldName);
 
+                        // 添加查询类型后缀选项
+                        for (String suffix : queryMethods.keySet()) {
+                            completions.add(capitalizedFieldName + suffix);
+                        }
+
                         // 添加And/Or连接符选项
                         completions.add(capitalizedFieldName + "And");
                         completions.add(capitalizedFieldName + "Or");
@@ -1235,6 +1270,11 @@ public class ServiceCompletionContributor extends CompletionContributor {
                             // 如果是完全匹配，总是显示选项
                             if (capitalizedFieldName.equals(remainingPart)) {
                                 completions.add(completion);
+
+                                // 添加查询类型后缀选项
+                                for (String suffix : queryMethods.keySet()) {
+                                    completions.add(completion + suffix);
+                                }
 
                                 // 添加And/Or连接符选项
                                 completions.add(completion + "And");
@@ -1311,7 +1351,10 @@ public class ServiceCompletionContributor extends CompletionContributor {
      */
     private String removeQueryTypeSuffixFromField(String fieldPart) {
         // 常见的查询类型后缀
-        String[] suffixes = {"Like", "Gt", "Lt", "Ge", "Le", "Ne", "Eq", "In", "NotIn", "Between", "NotBetween", "IsNull", "IsNotNull", "GreaterThan", "LessThan", "GreaterThanEqual", "LessThanEqual", "NotEqual"};
+        String[] suffixes = {"LikeLeft", "LikeRight", "NotLikeLeft", "NotLikeRight", "NotLike", "Like",
+                           "GreaterThanEqual", "LessThanEqual", "GreaterThan", "LessThan", "NotEqual",
+                           "Gt", "Lt", "Ge", "Le", "Ne", "Eq", "In", "NotIn", "Between", "NotBetween",
+                           "IsNull", "IsNotNull"};
 
         for (String suffix : suffixes) {
             if (fieldPart.endsWith(suffix)) {
@@ -2144,6 +2187,11 @@ public class ServiceCompletionContributor extends CompletionContributor {
      */
     private void addDefaultQueryMethods(Map<String, String> methodMapping) {
         methodMapping.put("Like", "like");
+        methodMapping.put("LikeLeft", "likeLeft");
+        methodMapping.put("LikeRight", "likeRight");
+        methodMapping.put("NotLike", "notLike");
+        methodMapping.put("NotLikeLeft", "notLikeLeft");
+        methodMapping.put("NotLikeRight", "notLikeRight");
         methodMapping.put("GreaterThan", "gt");
         methodMapping.put("LessThan", "lt");
         methodMapping.put("GreaterThanEqual", "ge");
@@ -2155,6 +2203,12 @@ public class ServiceCompletionContributor extends CompletionContributor {
         methodMapping.put("NotIn", "notIn");
         methodMapping.put("Between", "between");
         methodMapping.put("NotBetween", "notBetween");
+        methodMapping.put("Eq", "eq");
+        methodMapping.put("Gt", "gt");
+        methodMapping.put("Lt", "lt");
+        methodMapping.put("Ge", "ge");
+        methodMapping.put("Le", "le");
+        methodMapping.put("Ne", "ne");
     }
 
     /**

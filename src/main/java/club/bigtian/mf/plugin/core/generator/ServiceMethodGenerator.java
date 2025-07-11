@@ -343,7 +343,10 @@ public class ServiceMethodGenerator {
             }
 
             // 移除查询类型后缀
-            String[] suffixes = {"Like", "Gt", "Lt", "Ge", "Le", "Ne", "In", "NotIn", "Between", "NotBetween", "IsNull", "IsNotNull"};
+            String[] suffixes = {"LikeLeft", "LikeRight", "NotLikeLeft", "NotLikeRight", "NotLike", "Like",
+                               "GreaterThanEqual", "LessThanEqual", "GreaterThan", "LessThan", "NotEqual",
+                               "Gt", "Lt", "Ge", "Le", "Ne", "Eq", "In", "NotIn", "Between", "NotBetween",
+                               "IsNull", "IsNotNull"};
             for (String suffix : suffixes) {
                 if (fieldPart.endsWith(suffix)) {
                     fieldPart = fieldPart.substring(0, fieldPart.length() - suffix.length());
