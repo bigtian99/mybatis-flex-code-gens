@@ -97,22 +97,8 @@ public class ServiceMethodGenerator {
             userInputReplacement = "/**\n     * " + description + "\n     */\n    " +
                                  returnType + " " + methodName + "(" + parameters + ");";
         } else {
-            // 对于实现类或Controller，生成方法调用
-            if (StrUtil.isNotEmpty(parameters)) {
-                // 生成参数占位符
-                String[] paramArray = parameters.split(",");
-                StringBuilder paramPlaceholders = new StringBuilder();
-                for (int i = 0; i < paramArray.length; i++) {
-                    if (i > 0) paramPlaceholders.append(", ");
-                    // 提取参数名（去掉类型）
-                    String param = paramArray[i].trim();
-                    String paramName = param.substring(param.lastIndexOf(" ") + 1);
-                    paramPlaceholders.append(paramName);
-                }
-                userInputReplacement = methodName + "(" + paramPlaceholders.toString() + ")";
-            } else {
-                userInputReplacement = methodName + "()";
-            }
+            // 对于实现类或Controller，生成空括号的方法调用，让用户手动填写参数
+            userInputReplacement = methodName + "()";
         }
 
         document.replaceString(startOffset, tailOffset, userInputReplacement);

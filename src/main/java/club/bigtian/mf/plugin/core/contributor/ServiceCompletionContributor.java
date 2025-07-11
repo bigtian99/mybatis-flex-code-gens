@@ -963,9 +963,22 @@ public class ServiceCompletionContributor extends CompletionContributor {
     }
 
     /**
-     * 根据字段名获取参数类型
+     * 根据字段名从实体字段信息中获取实际的参数类型
      */
-    private String getParameterTypeFromFieldName(String fieldName) {
+    private String getParameterTypeFromFieldName(String fieldName, Map<String, FieldInfo> entityFields) {
+        if (entityFields != null && entityFields.containsKey(fieldName)) {
+            FieldInfo fieldInfo = entityFields.get(fieldName);
+            return fieldInfo.fieldType;
+        }
+
+        // 如果找不到字段信息，使用默认的类型推断作为后备方案
+        return getDefaultParameterTypeFromFieldName(fieldName);
+    }
+
+    /**
+     * 根据字段名进行默认的类型推断（后备方案）
+     */
+    private String getDefaultParameterTypeFromFieldName(String fieldName) {
         String lowerFieldName = fieldName.toLowerCase();
 
         if (lowerFieldName.contains("id")) {
