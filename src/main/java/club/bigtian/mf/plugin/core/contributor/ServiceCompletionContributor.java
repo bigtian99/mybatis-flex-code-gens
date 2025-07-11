@@ -1,10 +1,9 @@
 package club.bigtian.mf.plugin.core.contributor;
 
-import club.bigtian.mf.plugin.core.generator.ServiceMethodGenerator;
 import club.bigtian.mf.plugin.core.generator.MethodBodyGenerator;
-import club.bigtian.mf.plugin.core.generator.ImportManager;
-import club.bigtian.mf.plugin.core.parser.FieldParser;
+import club.bigtian.mf.plugin.core.generator.ServiceMethodGenerator;
 import club.bigtian.mf.plugin.core.icons.Icons;
+import club.bigtian.mf.plugin.core.parser.FieldParser;
 import club.bigtian.mf.plugin.core.util.ProjectUtils;
 import club.bigtian.mf.plugin.core.util.TableDefUtils;
 import club.bigtian.mf.plugin.core.util.VirtualFileUtils;
@@ -666,8 +665,12 @@ public class ServiceCompletionContributor extends CompletionContributor {
                     .withTailText(" { " + methodBody + " }", true)
                     .withIcon(Icons.FLEX)
                     .withInsertHandler((context, item) -> {
-                        // 插入方法体，光标聚焦到括号内
-                        insertMethodImplementationWithCursor(context, fullMethodName, methodBody, returnType, completion, entityFields, entityQualifiedName, fieldToTableDefMapping);
+                        // 使用统一的方法生成逻辑
+                        PsiElement element = context.getFile().findElementAt(context.getStartOffset());
+                        PsiClass currentClass = PsiTreeUtil.getParentOfType(element, PsiClass.class);
+                        Map<String, ServiceMethodGenerator.FieldInfo> newEntityFields = convertEntityFieldsMap(entityFields);
+                        methodGenerator.generateUnifiedMethod(context, currentClass, fullMethodName, methodBody, returnType,
+                                                             completion, newEntityFields, entityQualifiedName, fieldToTableDefMapping);
                     });
 
             result.addElement(methodElement);
@@ -706,7 +709,7 @@ public class ServiceCompletionContributor extends CompletionContributor {
                     .withTypeText(returnType)
                     .withIcon(Icons.FLEX);
 
-            // 统一使用接口+实现类生成逻辑
+            // 统一使用methodGenerator.generateUnifiedMethod
             Map<String, ServiceMethodGenerator.FieldInfo> newEntityFields = convertEntityFieldsMap(entityFields);
             String entityMethodBody = bodyGenerator.generateEntityMethodBody(queryPrefix, newEntityFields, fieldToTableDefMapping, simpleEntityName, entityClass, "eq");
             builder = builder.withTailText(" { generate in interface and implementation }", true)
@@ -715,13 +718,12 @@ public class ServiceCompletionContributor extends CompletionContributor {
                         Map<String, FieldInfo> entityMethodFields = new HashMap<>();
                         entityMethodFields.put("entity", new FieldInfo("entity", simpleEntityName, "entity"));
 
-                        if (isInterface) {
-                            // 在接口中，生成接口+实现
-                            generateServiceMethodInInterfaceAndImpl(context, currentServiceClass, entityMethodName, entityMethodBody, returnType, "Entity", entityMethodFields, entityQualifiedName, fieldToTableDefMapping);
-                        } else {
-                            // 在实现类中，使用原有逻辑
-                            insertMethodImplementationWithCursor(context, entityMethodName, entityMethodBody, returnType, "Entity", entityMethodFields, entityQualifiedName, fieldToTableDefMapping);
-                        }
+                        // 统一使用methodGenerator.generateUnifiedMethod，不再区分接口和实现类
+                        PsiElement element = context.getFile().findElementAt(context.getStartOffset());
+                        PsiClass currentClass = PsiTreeUtil.getParentOfType(element, PsiClass.class);
+                        Map<String, ServiceMethodGenerator.FieldInfo> newEntityFields1 = convertEntityFieldsMap(entityMethodFields);
+                        methodGenerator.generateUnifiedMethod(context, currentClass, entityMethodName, entityMethodBody, returnType,
+                                                             "Entity", newEntityFields1, entityQualifiedName, fieldToTableDefMapping);
                     });
 
             result.addElement(builder);
@@ -738,7 +740,7 @@ public class ServiceCompletionContributor extends CompletionContributor {
                     .withTypeText(returnType)
                     .withIcon(Icons.FLEX);
 
-            // 统一使用接口+实现类生成逻辑
+            // 统一使用methodGenerator.generateUnifiedMethod
             Map<String, ServiceMethodGenerator.FieldInfo> newEntityFieldsLike = convertEntityFieldsMap(entityFields);
             String entityMethodBodyLike = bodyGenerator.generateEntityMethodBody(queryPrefix, newEntityFieldsLike, fieldToTableDefMapping, simpleEntityName, entityClass, "like");
             builderLike = builderLike.withTailText(" { generate in interface and implementation }", true)
@@ -747,13 +749,12 @@ public class ServiceCompletionContributor extends CompletionContributor {
                         Map<String, FieldInfo> entityMethodFields = new HashMap<>();
                         entityMethodFields.put("entity", new FieldInfo("entity", simpleEntityName, "entity"));
 
-                        if (isInterface) {
-                            // 在接口中，生成接口+实现
-                            generateServiceMethodInInterfaceAndImpl(context, currentServiceClass, entityMethodNameLike, entityMethodBodyLike, returnType, "EntityLike", entityMethodFields, entityQualifiedName, fieldToTableDefMapping);
-                        } else {
-                            // 在实现类中，使用原有逻辑
-                            insertMethodImplementationWithCursor(context, entityMethodNameLike, entityMethodBodyLike, returnType, "EntityLike", entityMethodFields, entityQualifiedName, fieldToTableDefMapping);
-                        }
+                        // 统一使用methodGenerator.generateUnifiedMethod，不再区分接口和实现类
+                        PsiElement element = context.getFile().findElementAt(context.getStartOffset());
+                        PsiClass currentClass = PsiTreeUtil.getParentOfType(element, PsiClass.class);
+                        Map<String, ServiceMethodGenerator.FieldInfo> newEntityFields = convertEntityFieldsMap(entityMethodFields);
+                        methodGenerator.generateUnifiedMethod(context, currentClass, entityMethodNameLike, entityMethodBodyLike, returnType,
+                                                             "EntityLike", newEntityFields, entityQualifiedName, fieldToTableDefMapping);
                     });
 
             result.addElement(builderLike);
@@ -806,7 +807,12 @@ public class ServiceCompletionContributor extends CompletionContributor {
 
                 builder = builder.withTailText(" { " + methodBody + " }", true)
                         .withInsertHandler((context, item) -> {
-                            insertMethodImplementationWithCursor(context, methodName, methodBody, returnType, capitalizedFieldName, singleFieldMap, entityQualifiedName, fieldToTableDefMapping);
+                            // 使用统一的方法生成逻辑
+                            PsiElement element = context.getFile().findElementAt(context.getStartOffset());
+                            PsiClass currentClass = PsiTreeUtil.getParentOfType(element, PsiClass.class);
+                            Map<String, ServiceMethodGenerator.FieldInfo> newSingleFieldMap = convertEntityFieldsMap(singleFieldMap);
+                            methodGenerator.generateUnifiedMethod(context, currentClass, methodName, methodBody, returnType,
+                                                                 capitalizedFieldName, newSingleFieldMap, entityQualifiedName, fieldToTableDefMapping);
                         });
             }
 
@@ -1033,9 +1039,8 @@ public class ServiceCompletionContributor extends CompletionContributor {
             WriteCommandAction.runWriteCommandAction(project, () -> {
                 serviceImpl.add(method);
 
-                // 添加必要的导入语句
-                ImportManager importManager = new ImportManager();
-                importManager.addRequiredImportsToFile(serviceImpl.getContainingFile(), methodBody, project);
+                // 使用统一的导入处理方法
+                methodGenerator.getImportManager().addRequiredImportsToFile(serviceImpl.getContainingFile(), methodBody, project);
             });
 
         } catch (Exception e) {
@@ -1553,6 +1558,7 @@ public class ServiceCompletionContributor extends CompletionContributor {
                 .withInsertHandler((context, item) -> {
                     Map<String, ServiceMethodGenerator.FieldInfo> singleFieldMap = new HashMap<>();
                     singleFieldMap.put(fieldInfo.fieldName, convertToNewFieldInfo(fieldInfo));
+                    // 这里是为Service接口设计的，应该保持原来的调用
                     methodGenerator.generateServiceMethodInInterfaceAndImpl(context, serviceInterface, methodName, methodBody, returnType,
                                                            fieldInfo.fieldName, singleFieldMap, entityQualifiedName, fieldToTableDefMapping);
                 });
@@ -1713,6 +1719,7 @@ public class ServiceCompletionContributor extends CompletionContributor {
                     .withInsertHandler((context, item) -> {
                         Map<String, FieldInfo> singleFieldMap = new HashMap<>();
                         singleFieldMap.put(fieldInfo.fieldName, fieldInfo);
+                        // 这里是为Service接口设计的，应该保持原来的调用
                         generateServiceMethodInInterfaceAndImpl(context, serviceInterface, methodName, methodBody, returnType,
                                                                capitalizedFieldName, singleFieldMap, entityQualifiedName, fieldToTableDefMapping);
                     });
@@ -1744,6 +1751,7 @@ public class ServiceCompletionContributor extends CompletionContributor {
                     .withInsertHandler((context, item) -> {
                         Map<String, FieldInfo> entityMethodFields = new HashMap<>();
                         entityMethodFields.put("entity", new FieldInfo("entity", simpleEntityName, "entity"));
+                        // 这里是为Service接口设计的，应该保持原来的调用
                         generateServiceMethodInInterfaceAndImpl(context, serviceInterface, entityMethodName, entityMethodBody, returnType,
                                                                "Entity", entityMethodFields, entityQualifiedName, fieldToTableDefMapping);
                     });
@@ -1766,6 +1774,7 @@ public class ServiceCompletionContributor extends CompletionContributor {
                     .withInsertHandler((context, item) -> {
                         Map<String, FieldInfo> entityMethodFields = new HashMap<>();
                         entityMethodFields.put("entity", new FieldInfo("entity", simpleEntityName, "entity"));
+                        // 这里是为Service接口设计的，应该保持原来的调用
                         generateServiceMethodInInterfaceAndImpl(context, serviceInterface, entityMethodNameLike, entityMethodBodyLike, returnType,
                                                                "EntityLike", entityMethodFields, entityQualifiedName, fieldToTableDefMapping);
                     });
@@ -2124,7 +2133,12 @@ public class ServiceCompletionContributor extends CompletionContributor {
                     entityMethodFields.put("entity", new FieldInfo("entity", simpleEntityName, "entity"));
 
                     String fieldsCompletion = isLikeVersion ? "EntityLike" : "Entity";
-                    insertMethodImplementationWithCursor(context, methodName, methodBody, returnType, fieldsCompletion, entityMethodFields, entityQualifiedName, fieldToTableDefMapping);
+                    // 使用统一的方法生成逻辑
+                    PsiElement element = context.getFile().findElementAt(context.getStartOffset());
+                    PsiClass currentClass = PsiTreeUtil.getParentOfType(element, PsiClass.class);
+                    Map<String, ServiceMethodGenerator.FieldInfo> newEntityMethodFields = convertEntityFieldsMap(entityMethodFields);
+                    methodGenerator.generateUnifiedMethod(context, currentClass, methodName, methodBody, returnType,
+                                                         fieldsCompletion, newEntityMethodFields, entityQualifiedName, fieldToTableDefMapping);
                 });
 
         result.addElement(methodElement);

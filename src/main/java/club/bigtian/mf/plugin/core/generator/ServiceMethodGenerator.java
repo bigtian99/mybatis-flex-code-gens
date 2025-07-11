@@ -254,11 +254,40 @@ public class ServiceMethodGenerator {
             // 添加JavaDoc注释到实现方法
             addJavaDocToMethod(addedMethod, methodName, fieldsCompletion, entityFields, entityQualifiedName, factory);
 
-            // 添加必要的导入语句
-            importManager.addRequiredImportsToFile(serviceImpl.getContainingFile(), methodBody, project);
+            // 使用统一的导入处理方法
+            addRequiredImportsForMethod(serviceImpl.getContainingFile(), methodBody, project);
 
         } catch (Exception e) {
             System.err.println("Error generating method implementation: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    /**
+     * 统一的导入处理方法
+     * 为Service接口和Service实现类提供一致的导入处理逻辑
+     */
+    private void addRequiredImportsForMethod(PsiFile psiFile, String methodBody, Project project) {
+        try {
+            System.out.println("Adding imports for method body: " + methodBody);
+            System.out.println("Target file: " + psiFile.getName());
+
+            // 检查方法体是否包含ObjectUtil
+            if (methodBody.contains("ObjectUtil")) {
+                System.out.println("Method body contains ObjectUtil, will add import");
+            } else {
+                System.out.println("Method body does NOT contain ObjectUtil");
+            }
+
+            // 确保文档已提交
+            PsiDocumentManager.getInstance(project).commitAllDocuments();
+
+            // 调用ImportManager处理导入
+            importManager.addRequiredImportsToFile(psiFile, methodBody, project);
+
+            System.out.println("Import processing completed");
+        } catch (Exception e) {
+            System.err.println("Error in unified import processing: " + e.getMessage());
             e.printStackTrace();
         }
     }
@@ -392,14 +421,39 @@ public class ServiceMethodGenerator {
             generateServiceMethodInInterfaceAndImpl(context, currentClass, methodName, methodBody, returnType,
                                                   fieldsCompletion, entityFields, entityQualifiedName, fieldToTableDefMapping);
         } else {
-            // 如果是实现类（Service实现类或Controller），只生成方法实现
+            // 如果是实现类（Service实现类），使用原来的文档插入方式，但共用相同的导入处理
             generateSingleMethodImplementation(context, currentClass, methodName, methodBody, returnType,
                                              fieldsCompletion, entityFields, entityQualifiedName, fieldToTableDefMapping);
         }
     }
 
     /**
+     * 处理实现类中的用户输入替换和光标定位
+     */
+    private void handleUserInputForImplementation(InsertionContext context, String methodName) {
+        com.intellij.openapi.editor.Document document = context.getDocument();
+        com.intellij.openapi.editor.Editor editor = context.getEditor();
+
+        // 获取当前光标位置
+        int startOffset = context.getStartOffset();
+        int tailOffset = context.getTailOffset();
+
+        // 替换用户输入为方法名和空括号
+        String userInputReplacement = methodName + "()";
+        document.replaceString(startOffset, tailOffset, userInputReplacement);
+
+        // 计算光标在括号内的位置
+        int cursorPosition = startOffset + methodName.length() + 1; // +1 for opening parenthesis
+
+        // 将光标定位到括号内
+        editor.getCaretModel().moveToOffset(cursorPosition);
+    }
+
+
+
+    /**
      * 生成单个方法实现（用于Service实现类或Controller）
+     * 使用文档插入方式，与原来的 insertMethodImplementationWithCursor 保持一致
      */
     private void generateSingleMethodImplementation(InsertionContext context, PsiClass targetClass,
                                                   String methodName, String methodBody, String returnType,
@@ -408,31 +462,127 @@ public class ServiceMethodGenerator {
 
         ApplicationManager.getApplication().runWriteAction(() -> {
             try {
+                // 获取当前文档和编辑器
+                com.intellij.openapi.editor.Document document = context.getDocument();
+                com.intellij.openapi.editor.Editor editor = context.getEditor();
                 Project project = context.getProject();
-                PsiElementFactory factory = JavaPsiFacade.getElementFactory(project);
 
-                // 生成参数列表
+                // 获取当前光标位置
+                int startOffset = context.getStartOffset();
+                int tailOffset = context.getTailOffset();
+
+                // 生成参数列表（使用统一的方法）
                 String parameters = generateParameters(fieldsCompletion, entityFields, entityQualifiedName, fieldToTableDefMapping);
 
-                // 生成方法实现
-                String methodText = "/**\n     * " + bodyGenerator.generateMethodDescription(methodName) + "\n     */\n" +
-                                  "public " + returnType + " " + methodName + "(" + parameters + ") {\n" +
-                                  "    " + methodBody.replace("\n", "\n    ") + "\n" +
-                                  "}";
+                // 找到合适的插入位置
+                PsiFile psiFile = context.getFile();
+                PsiElement elementAtCaret = psiFile.findElementAt(startOffset);
+                int insertOffset = findInsertPosition(elementAtCaret, document);
 
-                PsiMethod method = factory.createMethodFromText(methodText, targetClass);
+                // 替换用户输入的内容为方法名和空括号
+                String userInputReplacement = methodName + "()";
+                document.replaceString(startOffset, tailOffset, userInputReplacement);
 
-                // 插入方法
-                targetClass.add(method);
+                // 计算光标在括号内的位置（在替换后）
+                int cursorPosition = startOffset + methodName.length() + 1; // +1 for opening parenthesis
 
-                // 添加必要的导入语句
-                importManager.addRequiredImportsToFile(targetClass.getContainingFile(), methodBody, project);
+                // 生成方法注释（使用统一的方法）
+                String methodComment = generateMethodComment(methodName, fieldsCompletion, entityFields, entityQualifiedName);
+
+                // 生成完整的方法实现
+                StringBuilder methodCode = new StringBuilder();
+                methodCode.append("\n\n");
+                methodCode.append(methodComment);
+                methodCode.append("    public ").append(returnType).append(" ").append(methodName).append("(");
+                methodCode.append(parameters).append(") {\n");
+
+                // 直接使用方法体，保持原有缩进
+                methodCode.append("        ").append(methodBody.replace("\n", "\n        ")).append("\n");
+
+                methodCode.append("    }");
+
+                // 插入完整的方法到合适位置
+                document.insertString(insertOffset, methodCode.toString());
+
+                // 提交文档更改，确保PSI同步
+                PsiDocumentManager.getInstance(project).commitDocument(document);
+
+                // 使用统一的导入处理方法
+                addRequiredImportsForMethod(targetClass.getContainingFile(), methodBody, project);
+
+                // 将光标定位到用户输入行的括号内
+                editor.getCaretModel().moveToOffset(cursorPosition);
 
             } catch (Exception e) {
                 System.err.println("Error generating single method implementation: " + e.getMessage());
                 e.printStackTrace();
             }
         });
+    }
+
+    /**
+     * 查找合适的插入位置
+     */
+    private int findInsertPosition(PsiElement elementAtCaret, com.intellij.openapi.editor.Document document) {
+        // 向上查找包含的方法或类
+        PsiElement current = elementAtCaret;
+        PsiMethod containingMethod = null;
+        PsiClass containingClass = null;
+
+        while (current != null) {
+            if (current instanceof PsiMethod && containingMethod == null) {
+                containingMethod = (PsiMethod) current;
+            } else if (current instanceof PsiClass && containingClass == null) {
+                containingClass = (PsiClass) current;
+                break;
+            }
+            current = current.getParent();
+        }
+
+        if (containingClass != null) {
+            // 如果在方法内，确保插入到当前方法外面
+            if (containingMethod != null) {
+                // 在当前方法后面插入
+                return containingMethod.getTextRange().getEndOffset();
+            } else {
+                // 如果不在方法内，插入到类的最后一个方法后面
+                PsiMethod[] methods = containingClass.getMethods();
+                if (methods.length > 0) {
+                    // 找到最后一个方法的结束位置
+                    PsiMethod lastMethod = methods[methods.length - 1];
+                    return lastMethod.getTextRange().getEndOffset();
+                } else {
+                    // 如果没有方法，插入到类的结束大括号前
+                    String classText = containingClass.getText();
+                    int classStart = containingClass.getTextRange().getStartOffset();
+                    int lastBraceIndex = classText.lastIndexOf('}');
+                    if (lastBraceIndex > 0) {
+                        return classStart + lastBraceIndex;
+                    }
+                    return containingClass.getTextRange().getEndOffset() - 1;
+                }
+            }
+        }
+
+        // 如果找不到合适位置，使用当前位置
+        return elementAtCaret.getTextRange().getEndOffset();
+    }
+
+    /**
+     * 生成方法注释
+     */
+    private String generateMethodComment(String methodName, String fieldsCompletion,
+                                       Map<String, FieldInfo> entityFields, String entityQualifiedName) {
+        StringBuilder comment = new StringBuilder();
+        comment.append("    /**\n");
+
+        // 使用 MethodBodyGenerator 生成描述
+        String description = bodyGenerator.generateMethodDescription(methodName);
+
+        comment.append("     * ").append(description).append("\n");
+        comment.append("     */\n");
+
+        return comment.toString();
     }
 
     /**

@@ -132,25 +132,62 @@ public class ImportManager {
             PsiDocumentManager documentManager = PsiDocumentManager.getInstance(javaFile.getProject());
             com.intellij.openapi.editor.Document document = documentManager.getDocument(javaFile);
             if (document != null) {
-                // 检查是否已经有package语句
+                // 确保文档已提交
+                documentManager.commitDocument(document);
+
+                // 检查是否已经包含该导入
                 String text = document.getText();
-                if (text.contains("package ")) {
-                    // 在package语句后添加import
-                    int packageEnd = text.indexOf(";", text.indexOf("package ")) + 1;
-                    if (packageEnd > 0) {
-                        String importText = "\nimport " + qualifiedName + ";";
-                        document.insertString(packageEnd, importText);
-                    }
-                } else {
-                    // 在文件开头添加import
-                    if (!text.contains("import " + qualifiedName)) {
-                        String importText = "import " + qualifiedName + ";\n";
-                        document.insertString(0, importText);
-                    }
+                if (text.contains("import " + qualifiedName + ";")) {
+                    return; // 已经存在，不需要重复添加
+                }
+
+                // 查找合适的插入位置
+                int insertPosition = findImportInsertPosition(text, qualifiedName);
+                if (insertPosition >= 0) {
+                    String importText = "import " + qualifiedName + ";\n";
+                    document.insertString(insertPosition, importText);
+
+                    // 提交文档更改
+                    documentManager.commitDocument(document);
                 }
             }
         } catch (Exception e) {
+            System.err.println("Error adding import directly: " + e.getMessage());
             e.printStackTrace();
+        }
+    }
+
+    /**
+     * 查找导入语句的插入位置
+     */
+    private int findImportInsertPosition(String text, String qualifiedName) {
+        try {
+            // 查找package语句的结束位置
+            int packageEnd = -1;
+            if (text.contains("package ")) {
+                int packageStart = text.indexOf("package ");
+                int packageSemicolon = text.indexOf(";", packageStart);
+                if (packageSemicolon > 0) {
+                    packageEnd = packageSemicolon + 1;
+                }
+            }
+
+            // 查找第一个import语句的位置
+            int firstImportPos = text.indexOf("import ");
+
+            if (firstImportPos > 0 && (packageEnd < 0 || firstImportPos > packageEnd)) {
+                // 如果有import语句，插入到第一个import前
+                return firstImportPos;
+            } else if (packageEnd > 0) {
+                // 如果有package语句但没有import，插入到package后
+                return packageEnd + (text.charAt(packageEnd) == '\n' ? 0 : 1);
+            } else {
+                // 如果都没有，插入到文件开头
+                return 0;
+            }
+        } catch (Exception e) {
+            System.err.println("Error finding import position: " + e.getMessage());
+            return 0;
         }
     }
 
