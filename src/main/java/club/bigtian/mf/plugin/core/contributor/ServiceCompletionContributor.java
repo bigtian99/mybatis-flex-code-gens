@@ -4,10 +4,8 @@ import club.bigtian.mf.plugin.core.generator.MethodBodyGenerator;
 import club.bigtian.mf.plugin.core.generator.ServiceMethodGenerator;
 import club.bigtian.mf.plugin.core.icons.Icons;
 import club.bigtian.mf.plugin.core.parser.FieldParser;
-import club.bigtian.mf.plugin.core.util.ProjectUtils;
 import club.bigtian.mf.plugin.core.util.TableDefUtils;
 import club.bigtian.mf.plugin.core.util.VirtualFileUtils;
-import club.bigtian.mf.plugin.entity.AptInfo;
 import cn.hutool.core.util.StrUtil;
 import com.intellij.codeInsight.completion.*;
 import com.intellij.codeInsight.lookup.LookupElement;
@@ -22,7 +20,6 @@ import com.intellij.openapi.util.Computable;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.patterns.PlatformPatterns;
 import com.intellij.psi.*;
-import com.intellij.psi.javadoc.PsiDocComment;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.search.searches.ClassInheritorsSearch;
 import com.intellij.psi.util.PsiTreeUtil;
@@ -1177,14 +1174,8 @@ public class ServiceCompletionContributor extends CompletionContributor {
                 String capitalizedFieldName = StrUtil.upperFirst(fieldName);
                 // 避免重复字段
                 if (!usedFields.contains(fieldName)) {
-                    // 添加基本字段补全
+                    // 只添加基本字段补全，用户可以手动添加查询类型后缀
                     completions.add(fieldsPart + capitalizedFieldName);
-
-                    // 添加带查询类型后缀的字段补全
-                    Map<String, String> queryMethods1 = getQueryColumnMethods(project);
-                    for (String suffix : queryMethods1.keySet()) {
-                        completions.add(fieldsPart + capitalizedFieldName + suffix);
-                    }
                 }
             }
             return completions;
@@ -1202,11 +1193,6 @@ public class ServiceCompletionContributor extends CompletionContributor {
                     if (capitalizedFieldName.equals(fieldsPart)) {
                         // 单字段（默认eq查询）
                         completions.add(capitalizedFieldName);
-
-                        // 动态添加查询类型后缀的选项
-                        for (String suffix : queryMethods.keySet()) {
-                            completions.add(capitalizedFieldName + suffix);
-                        }
 
                         // 添加And/Or连接符选项
                         completions.add(capitalizedFieldName + "And");
@@ -1231,18 +1217,7 @@ public class ServiceCompletionContributor extends CompletionContributor {
             }
 
             // 3. 检查是否是部分QueryColumn方法名的匹配（如输入"TitleL"想要"TitleLike"）
-            if (fieldsPart.length() > capitalizedFieldName.length() &&
-                fieldsPart.startsWith(capitalizedFieldName)) {
-                String remainingSuffix = fieldsPart.substring(capitalizedFieldName.length());
-                for (String suffix : queryMethods.keySet()) {
-                    if (suffix.startsWith(remainingSuffix) && !suffix.equals(remainingSuffix)) {
-                        // 避免重复字段
-                        if (!usedFields.contains(fieldName)) {
-                            completions.add(capitalizedFieldName + suffix);
-                        }
-                    }
-                }
-            }
+            // 移除这部分逻辑，用户可以手动添加查询类型后缀
 
             // 检查And/Or组合中的字段匹配
             if (fieldsPart.contains("And") || fieldsPart.contains("Or")) {
@@ -1261,11 +1236,6 @@ public class ServiceCompletionContributor extends CompletionContributor {
                             if (capitalizedFieldName.equals(remainingPart)) {
                                 completions.add(completion);
 
-                                // 动态添加查询类型后缀的选项
-                                for (String suffix : queryMethods.keySet()) {
-                                    completions.add(completion + suffix);
-                                }
-
                                 // 添加And/Or连接符选项
                                 completions.add(completion + "And");
                                 completions.add(completion + "Or");
@@ -1273,26 +1243,11 @@ public class ServiceCompletionContributor extends CompletionContributor {
                                 // 部分匹配，避免重复字段
                                 if (!usedFields.contains(fieldName)) {
                                     completions.add(completion);
-
-                                    // 动态添加查询类型后缀的选项
-                                    for (String suffix : queryMethods.keySet()) {
-                                        completions.add(completion + suffix);
-                                    }
                                 }
                             }
                         }
 
-                        // 检查字段名+部分QueryColumn方法名的匹配（在And/Or组合中）
-                        for (String suffix : queryMethods.keySet()) {
-                            String fieldWithSuffix = capitalizedFieldName + suffix;
-                            if (fieldWithSuffix.startsWith(remainingPart) && fieldWithSuffix.length() > remainingPart.length()) {
-                                // 避免重复字段
-                                if (!usedFields.contains(fieldName)) {
-                                    String prefix = fieldsPart.substring(0, fieldsPart.length() - remainingPart.length());
-                                    completions.add(prefix + fieldWithSuffix);
-                                }
-                            }
-                        }
+                        // 移除字段名+部分QueryColumn方法名的匹配逻辑，用户可以手动添加查询类型后缀
                     }
                 }
             }
@@ -1329,8 +1284,10 @@ public class ServiceCompletionContributor extends CompletionContributor {
             if ("And".equals(part) || "Or".equals(part)) {
                 // 遇到连接符，保存当前字段
                 if (currentField.length() > 0) {
-                    String fieldName = StrUtil.lowerFirst(currentField.toString());
-                    usedFields.add(fieldName);
+                    String fieldPart = currentField.toString();
+                    // 移除查询类型后缀
+                    String fieldName = removeQueryTypeSuffixFromField(fieldPart);
+                    usedFields.add(StrUtil.lowerFirst(fieldName));
                     currentField.setLength(0);
                 }
             } else {
@@ -1340,11 +1297,29 @@ public class ServiceCompletionContributor extends CompletionContributor {
 
         // 处理最后一个字段
         if (currentField.length() > 0) {
-            String fieldName = StrUtil.lowerFirst(currentField.toString());
-            usedFields.add(fieldName);
+            String fieldPart = currentField.toString();
+            // 移除查询类型后缀
+            String fieldName = removeQueryTypeSuffixFromField(fieldPart);
+            usedFields.add(StrUtil.lowerFirst(fieldName));
         }
 
         return usedFields;
+    }
+
+    /**
+     * 从字段部分移除查询类型后缀
+     */
+    private String removeQueryTypeSuffixFromField(String fieldPart) {
+        // 常见的查询类型后缀
+        String[] suffixes = {"Like", "Gt", "Lt", "Ge", "Le", "Ne", "Eq", "In", "NotIn", "Between", "NotBetween", "IsNull", "IsNotNull", "GreaterThan", "LessThan", "GreaterThanEqual", "LessThanEqual", "NotEqual"};
+
+        for (String suffix : suffixes) {
+            if (fieldPart.endsWith(suffix)) {
+                return fieldPart.substring(0, fieldPart.length() - suffix.length());
+            }
+        }
+
+        return fieldPart;
     }
 
     /**
@@ -1474,6 +1449,56 @@ public class ServiceCompletionContributor extends CompletionContributor {
 
         String simpleEntityName = StrUtil.subAfter(entityQualifiedName, ".", true);
 
+        // 首先添加实体方法（如 listByActivitiModel 和 listByActivitiModelLike）
+        if ("listBy".equals(methodPrefix) || "findBy".equals(methodPrefix)) {
+            // 生成eq版本的实体方法
+            String entityMethodName = methodPrefix + simpleEntityName;
+            if (!methodExists(serviceInterface, entityMethodName)) {
+                String entityMethodSignature = entityMethodName + "()";
+                String returnType = getReturnTypeForMethodPrefix(methodPrefix, simpleEntityName);
+                String entityMethodBody = bodyGenerator.generateEntityMethodBody(methodPrefix, convertEntityFieldsMap(entityFields), fieldToTableDefMapping, simpleEntityName, null, "eq");
+
+                LookupElement methodElement = LookupElementBuilder.create(entityMethodSignature)
+                        .withPresentableText(entityMethodSignature)
+                        .withTypeText(returnType)
+                        .withTailText(" { generate in interface and implementation }", true)
+                        .withIcon(Icons.FLEX)
+                        .withInsertHandler((context, item) -> {
+                            Map<String, FieldInfo> entityMethodFields = new HashMap<>();
+                            entityMethodFields.put("entity", new FieldInfo("entity", simpleEntityName, "entity"));
+                            // 这里是为Service接口设计的，应该保持原来的调用
+                            generateServiceMethodInInterfaceAndImpl(context, serviceInterface, entityMethodName, entityMethodBody, returnType,
+                                                                   "Entity", entityMethodFields, entityQualifiedName, fieldToTableDefMapping);
+                        });
+
+                result.addElement(methodElement);
+            }
+
+            // 生成like版本的实体方法
+            String entityLikeMethodName = methodPrefix + simpleEntityName + "Like";
+            if (!methodExists(serviceInterface, entityLikeMethodName)) {
+                String entityLikeMethodSignature = entityLikeMethodName + "()";
+                String returnType = getReturnTypeForMethodPrefix(methodPrefix, simpleEntityName);
+                String entityLikeMethodBody = bodyGenerator.generateEntityMethodBody(methodPrefix, convertEntityFieldsMap(entityFields), fieldToTableDefMapping, simpleEntityName, null, "like");
+
+                LookupElement methodElement = LookupElementBuilder.create(entityLikeMethodSignature)
+                        .withPresentableText(entityLikeMethodSignature)
+                        .withTypeText(returnType)
+                        .withTailText(" { generate in interface and implementation }", true)
+                        .withIcon(Icons.FLEX)
+                        .withInsertHandler((context, item) -> {
+                            Map<String, FieldInfo> entityMethodFields = new HashMap<>();
+                            entityMethodFields.put("entity", new FieldInfo("entity", simpleEntityName, "entity"));
+                            // 这里是为Service接口设计的，应该保持原来的调用
+                            generateServiceMethodInInterfaceAndImpl(context, serviceInterface, entityLikeMethodName, entityLikeMethodBody, returnType,
+                                                                   "EntityLike", entityMethodFields, entityQualifiedName, fieldToTableDefMapping);
+                        });
+
+                result.addElement(methodElement);
+            }
+        }
+
+        // 然后添加字段方法
         for (FieldInfo fieldInfo : entityFields.values()) {
             // 只处理在APT TableDef中存在的字段
             if (!fieldToTableDefMapping.containsKey(fieldInfo.fieldName)) {
@@ -1813,14 +1838,9 @@ public class ServiceCompletionContributor extends CompletionContributor {
             String capitalizedFieldName = StrUtil.upperFirst(fieldName);
             // 避免重复字段
             if (!usedFields.contains(fieldName)) {
+                // 只添加基本字段补全，用户可以手动添加查询类型后缀
                 completions.add(fieldsPart + "And" + capitalizedFieldName);
                 completions.add(fieldsPart + "Or" + capitalizedFieldName);
-
-                // 也添加带查询类型后缀的选项
-                for (String suffix : queryMethods.keySet()) {
-                    completions.add(fieldsPart + "And" + capitalizedFieldName + suffix);
-                    completions.add(fieldsPart + "Or" + capitalizedFieldName + suffix);
-                }
             }
         }
     }
