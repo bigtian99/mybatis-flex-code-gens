@@ -483,9 +483,6 @@ public class ServiceMethodGenerator {
                 String userInputReplacement = methodName + "()";
                 document.replaceString(startOffset, tailOffset, userInputReplacement);
 
-                // 计算光标在括号内的位置（在替换后）
-                int cursorPosition = startOffset + methodName.length() + 1; // +1 for opening parenthesis
-
                 // 生成方法注释（使用统一的方法）
                 String methodComment = generateMethodComment(methodName, fieldsCompletion, entityFields, entityQualifiedName);
 
@@ -510,8 +507,8 @@ public class ServiceMethodGenerator {
                 // 使用统一的导入处理方法
                 addRequiredImportsForMethod(targetClass.getContainingFile(), methodBody, project);
 
-                // 将光标定位到用户输入行的括号内
-                editor.getCaretModel().moveToOffset(cursorPosition);
+                // 使用与Service接口相同的光标定位方法
+                positionCursor(context, methodName);
 
             } catch (Exception e) {
                 System.err.println("Error generating single method implementation: " + e.getMessage());
