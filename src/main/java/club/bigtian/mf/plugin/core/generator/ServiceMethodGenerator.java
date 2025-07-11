@@ -154,10 +154,19 @@ public class ServiceMethodGenerator {
     /**
      * 在接口中生成方法声明
      */
-    private void generateInterfaceMethod(PsiClass serviceInterface, String methodName, String returnType, 
+    private void generateInterfaceMethod(PsiClass serviceInterface, String methodName, String returnType,
                                        String parameters, String fieldsCompletion, Map<String, FieldInfo> entityFields,
                                        String entityQualifiedName, Project project) {
         try {
+            // 检查方法是否已存在
+            PsiMethod[] existingMethods = serviceInterface.getAllMethods();
+            for (PsiMethod existingMethod : existingMethods) {
+                if (methodName.equals(existingMethod.getName())) {
+                    System.out.println("Method " + methodName + " already exists in interface, skipping");
+                    return;
+                }
+            }
+
             PsiElementFactory factory = JavaPsiFacade.getElementFactory(project);
 
             // 创建纯粹的方法声明
