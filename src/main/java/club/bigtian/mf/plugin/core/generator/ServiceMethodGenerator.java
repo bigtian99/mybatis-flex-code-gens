@@ -12,6 +12,7 @@ import com.intellij.psi.search.searches.ClassInheritorsSearch;
 import com.intellij.psi.util.PsiTreeUtil;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -60,7 +61,7 @@ public class ServiceMethodGenerator {
                 String parameters = generateParameters(fieldsCompletion, entityFields, entityQualifiedName, fieldToTableDefMapping);
 
                 // 2. 先替换用户输入为方法调用，避免影响接口方法声明的添加
-                replaceUserInput(context, methodName, parameters, returnType, fieldsCompletion);
+                replaceUserInput(context, methodName, parameters, returnType, fieldsCompletion, entityFields);
 
                 // 3. 在接口中生成方法声明
                 generateInterfaceMethod(serviceInterface, methodName, returnType, parameters, fieldsCompletion, entityFields, entityQualifiedName, project);
@@ -81,7 +82,7 @@ public class ServiceMethodGenerator {
     /**
      * 替换用户输入
      */
-    private void replaceUserInput(InsertionContext context, String methodName, String parameters, String returnType, String fieldsCompletion) {
+    private void replaceUserInput(InsertionContext context, String methodName, String parameters, String returnType, String fieldsCompletion, Map<String, FieldInfo> entityFields) {
         com.intellij.openapi.editor.Document document = context.getDocument();
         int startOffset = context.getStartOffset();
         int tailOffset = context.getTailOffset();
@@ -93,7 +94,16 @@ public class ServiceMethodGenerator {
         String userInputReplacement;
         if (currentClass != null && currentClass.isInterface()) {
             // 对于接口，生成完整的方法声明
-            String description = bodyGenerator.generateMethodDescription(methodName);
+            // 转换 FieldInfo 到 ServiceMethodGenerator.FieldInfo
+            Map<String, ServiceMethodGenerator.FieldInfo> convertedFields = new HashMap<>();
+            if (entityFields != null) {
+                for (Map.Entry<String, FieldInfo> entry : entityFields.entrySet()) {
+                    FieldInfo oldField = entry.getValue();
+                    convertedFields.put(entry.getKey(), new ServiceMethodGenerator.FieldInfo(
+                        oldField.fieldName, oldField.fieldType, oldField.columnName, oldField.fieldComment));
+                }
+            }
+            String description = bodyGenerator.generateMethodDescription(methodName, fieldsCompletion, convertedFields);
             userInputReplacement = "/**\n     * " + description + "\n     */\n    " +
                                  returnType + " " + methodName + "(" + parameters + ");";
         } else {
@@ -245,10 +255,6 @@ public class ServiceMethodGenerator {
             // 在实现类中插入方法
             PsiMethod addedMethod = (PsiMethod) serviceImpl.add(method);
 
-            System.out.println("Successfully added method to implementation: " + addedMethod.getName());
-            System.out.println("Implementation method text: " + addedMethod.getText());
-            System.out.println("Implementation class: " + serviceImpl.getName());
-            System.out.println("Implementation file: " + serviceImpl.getContainingFile().getName());
 
             // 添加JavaDoc注释到实现方法
             addJavaDocToMethod(addedMethod, methodName, fieldsCompletion, entityFields, entityQualifiedName, factory);
@@ -268,8 +274,7 @@ public class ServiceMethodGenerator {
      */
     private void addRequiredImportsForMethod(PsiFile psiFile, String methodBody, Project project) {
         try {
-            System.out.println("Adding imports for method body: " + methodBody);
-            System.out.println("Target file: " + psiFile.getName());
+
 
             // 检查方法体是否包含ObjectUtil
             if (methodBody.contains("ObjectUtil")) {
@@ -364,8 +369,8 @@ public class ServiceMethodGenerator {
     private void addJavaDocToMethod(PsiMethod method, String methodName, String fieldsCompletion,
                                   Map<String, FieldInfo> entityFields, String entityQualifiedName, PsiElementFactory factory) {
         try {
-            // 生成简单的JavaDoc注释
-            String description = generateMethodDescription(methodName);
+            // 使用带字段信息的方法生成描述
+            String description = generateMethodDescription(methodName, fieldsCompletion, entityFields);
             String commentText = "/**\n     * " + description + "\n     */";
 
             PsiDocComment docComment = factory.createDocCommentFromText(commentText);
@@ -378,21 +383,83 @@ public class ServiceMethodGenerator {
     }
 
     private String generateMethodDescription(String methodName) {
+        return generateMethodDescription(methodName, null, null);
+    }
+
+    /**
+     * 生成方法描述（支持根据字段注释动态生成）
+     */
+    private String generateMethodDescription(String methodName, String fieldsCompletion, Map<String, FieldInfo> entityFields) {
         String lowerMethodName = methodName.toLowerCase();
+        String baseDescription;
+
         if (lowerMethodName.startsWith("listby")) {
-            return "根据条件查询列表";
+            baseDescription = "根据条件查询列表";
         } else if (lowerMethodName.startsWith("findby")) {
-            return "根据条件查找数据";
+            baseDescription = "根据条件查找数据";
         } else if (lowerMethodName.startsWith("getby")) {
-            return "根据条件获取单个数据";
+            baseDescription = "根据条件获取单个数据";
         } else if (lowerMethodName.startsWith("countby")) {
-            return "根据条件统计数量";
+            baseDescription = "根据条件统计数量";
         } else if (lowerMethodName.startsWith("existsby")) {
-            return "根据条件检查是否存在";
+            baseDescription = "根据条件检查是否存在";
         } else if (lowerMethodName.startsWith("removeby") || lowerMethodName.startsWith("deleteby")) {
-            return "根据条件删除数据";
+            baseDescription = "根据条件删除数据";
         } else {
-            return "根据条件查询数据";
+            baseDescription = "根据条件查询数据";
+        }
+
+        // 如果有字段信息，尝试从字段注释生成更具体的描述
+        if (StrUtil.isNotEmpty(fieldsCompletion) && entityFields != null) {
+            String fieldDescription = generateFieldBasedDescription(fieldsCompletion, entityFields);
+            if (StrUtil.isNotEmpty(fieldDescription)) {
+                return baseDescription.replace("条件", fieldDescription);
+            }
+        }
+
+        return baseDescription;
+    }
+
+    /**
+     * 根据字段注释生成字段描述
+     */
+    private String generateFieldBasedDescription(String fieldsCompletion, Map<String, FieldInfo> entityFields) {
+        try {
+            // 解析字段名
+            List<String> fields = parseFieldsFromCompletion(fieldsCompletion);
+            if (fields.isEmpty()) {
+                return "";
+            }
+
+            StringBuilder description = new StringBuilder();
+            for (int i = 0; i < fields.size(); i++) {
+                String field = fields.get(i);
+                FieldInfo fieldInfo = entityFields.get(field);
+
+                // 如果直接匹配失败，尝试小写首字母的版本
+                if (fieldInfo == null) {
+                    String lowerFirstField = StrUtil.lowerFirst(field);
+                    fieldInfo = entityFields.get(lowerFirstField);
+                }
+
+                if (fieldInfo != null && StrUtil.isNotEmpty(fieldInfo.fieldComment)) {
+                    if (description.length() > 0) {
+                        description.append("和");
+                    }
+                    description.append(fieldInfo.fieldComment);
+                } else {
+                    // 如果没有注释，使用字段名
+                    if (description.length() > 0) {
+                        description.append("和");
+                    }
+                    description.append(field);
+                }
+            }
+
+            return description.toString();
+        } catch (Exception e) {
+            System.err.println("Failed to generate field-based description: " + e.getMessage());
+            return "";
         }
     }
 
@@ -575,8 +642,8 @@ public class ServiceMethodGenerator {
         StringBuilder comment = new StringBuilder();
         comment.append("    /**\n");
 
-        // 使用 MethodBodyGenerator 生成描述
-        String description = bodyGenerator.generateMethodDescription(methodName);
+        // 使用带字段信息的方法生成描述
+        String description = generateMethodDescription(methodName, fieldsCompletion, entityFields);
 
         comment.append("     * ").append(description).append("\n");
         comment.append("     */\n");
@@ -591,11 +658,20 @@ public class ServiceMethodGenerator {
         public String fieldName;
         public String fieldType;
         public String columnName;
+        public String fieldComment;
 
         public FieldInfo(String fieldName, String fieldType, String columnName) {
             this.fieldName = fieldName;
             this.fieldType = fieldType;
             this.columnName = columnName;
+            this.fieldComment = "";
+        }
+
+        public FieldInfo(String fieldName, String fieldType, String columnName, String fieldComment) {
+            this.fieldName = fieldName;
+            this.fieldType = fieldType;
+            this.columnName = columnName;
+            this.fieldComment = fieldComment != null ? fieldComment : "";
         }
     }
 }

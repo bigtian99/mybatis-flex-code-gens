@@ -2,9 +2,15 @@ package club.bigtian.mf.plugin.core.parser;
 
 import club.bigtian.mf.plugin.core.generator.ServiceMethodGenerator;
 import cn.hutool.core.util.StrUtil;
+import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.progress.ProcessCanceledException;
+import com.intellij.openapi.util.Computable;
+import com.intellij.psi.PsiAnnotation;
+import com.intellij.psi.PsiAnnotationMemberValue;
 import com.intellij.psi.PsiClass;
 import com.intellij.psi.PsiField;
 import com.intellij.psi.PsiModifier;
+import com.intellij.psi.javadoc.PsiDocComment;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -21,27 +27,113 @@ public class FieldParser {
      * 获取实体类字段信息
      */
     public Map<String, ServiceMethodGenerator.FieldInfo> getEntityFieldsInfo(PsiClass entityClass) {
-        Map<String, ServiceMethodGenerator.FieldInfo> fieldsInfo = new HashMap<>();
-
-        PsiField[] fields = entityClass.getAllFields();
-        for (PsiField field : fields) {
-            // 跳过静态字段和常量
-            if (field.hasModifierProperty(PsiModifier.STATIC) ||
-                field.hasModifierProperty(PsiModifier.FINAL)) {
-                continue;
-            }
-
-            String fieldName = field.getName();
-            String fieldType = field.getType().getPresentableText();
-            String columnName = getColumnAnnotationValue(field);
-            if (StrUtil.isEmpty(columnName)) {
-                columnName = toUnderscoreCase(fieldName);
-            }
-
-            fieldsInfo.put(fieldName, new ServiceMethodGenerator.FieldInfo(fieldName, fieldType, columnName));
+        if (entityClass == null) {
+            return new HashMap<>();
         }
 
-        return fieldsInfo;
+        // 确保在读取线程中执行 PSI 访问
+        return ApplicationManager.getApplication().runReadAction((Computable<Map<String, ServiceMethodGenerator.FieldInfo>>) () -> {
+            Map<String, ServiceMethodGenerator.FieldInfo> fieldsInfo = new HashMap<>();
+
+            try {
+                PsiField[] fields = entityClass.getAllFields();
+                if (fields == null) {
+                    return fieldsInfo;
+                }
+
+                for (PsiField field : fields) {
+                    try {
+                        // 安全检查字段是否为空
+                        if (field == null) {
+                            continue;
+                        }
+
+                        // 跳过静态字段和常量
+                        if (field.hasModifierProperty(PsiModifier.STATIC) ||
+                            field.hasModifierProperty(PsiModifier.FINAL)) {
+                            continue;
+                        }
+
+                        String fieldName = field.getName();
+                        if (StrUtil.isEmpty(fieldName)) {
+                            continue;
+                        }
+
+                        String fieldType;
+                        try {
+                            fieldType = field.getType().getPresentableText();
+                        } catch (Exception e) {
+                            fieldType = "Object"; // 默认类型
+                        }
+
+                        String columnName = getColumnAnnotationValue(field);
+                        if (StrUtil.isEmpty(columnName)) {
+                            columnName = toUnderscoreCase(fieldName);
+                        }
+
+                        // 获取字段的文档注释
+                        String fieldComment = getFieldDocComment(field);
+
+                        fieldsInfo.put(fieldName, new ServiceMethodGenerator.FieldInfo(fieldName, fieldType, columnName, fieldComment));
+                    } catch (ProcessCanceledException e) {
+                        // 重新抛出 ProcessCanceledException
+                        throw e;
+                    } catch (Exception e) {
+                        // 跳过有问题的字段，继续处理其他字段
+                        System.err.println("Failed to process field: " + e.getMessage());
+                    }
+                }
+            } catch (ProcessCanceledException e) {
+                // 重新抛出 ProcessCanceledException
+                throw e;
+            } catch (Exception e) {
+                System.err.println("Failed to get entity fields info: " + e.getMessage());
+            }
+
+            return fieldsInfo;
+        });
+    }
+
+    /**
+     * 获取字段的文档注释
+     */
+    private String getFieldDocComment(PsiField field) {
+        try {
+            PsiDocComment docComment = field.getDocComment();
+            if (docComment != null) {
+                String commentText = docComment.getText();
+                if (StrUtil.isNotEmpty(commentText)) {
+                    // 提取注释内容，去除 /** */ 和 * 前缀
+                    String[] lines = commentText.split("\n");
+                    StringBuilder result = new StringBuilder();
+                    for (String line : lines) {
+                        line = line.trim();
+                        if (line.startsWith("/**") || line.startsWith("*/") || line.equals("*")) {
+                            continue;
+                        }
+                        if (line.startsWith("* ")) {
+                            line = line.substring(2);
+                        } else if (line.startsWith("*")) {
+                            line = line.substring(1);
+                        }
+                        if (StrUtil.isNotEmpty(line.trim())) {
+                            if (result.length() > 0) {
+                                result.append(" ");
+                            }
+                            result.append(line.trim());
+                        }
+                    }
+                    return result.toString();
+                }
+            }
+        } catch (ProcessCanceledException e) {
+            // 重新抛出 ProcessCanceledException
+            throw e;
+        } catch (Exception e) {
+            // 如果获取注释失败，返回空字符串
+            System.err.println("Failed to get field doc comment: " + e.getMessage());
+        }
+        return "";
     }
 
     /**
@@ -176,7 +268,29 @@ public class FieldParser {
      * 获取@Column注解的值
      */
     private String getColumnAnnotationValue(PsiField field) {
-        // TODO: 实现@Column注解值的获取
+        try {
+            PsiAnnotation columnAnnotation = field.getAnnotation("com.mybatisflex.annotation.Column");
+            if (columnAnnotation == null) {
+                return null;
+            }
+
+            // 获取value属性
+            PsiAnnotationMemberValue valueAttribute = columnAnnotation.findAttributeValue("value");
+            if (valueAttribute != null) {
+                String value = valueAttribute.getText();
+                // 移除引号
+                if (value.startsWith("\"") && value.endsWith("\"")) {
+                    value = value.substring(1, value.length() - 1);
+                }
+                return StrUtil.isNotEmpty(value) ? value : null;
+            }
+        } catch (ProcessCanceledException e) {
+            // 重新抛出 ProcessCanceledException
+            throw e;
+        } catch (Exception e) {
+            // 如果获取注解失败，返回 null
+            System.err.println("Failed to get column annotation value: " + e.getMessage());
+        }
         return null;
     }
 

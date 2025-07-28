@@ -192,21 +192,121 @@ public class MethodBodyGenerator {
      * 生成方法描述
      */
     public String generateMethodDescription(String methodName) {
+        return generateMethodDescription(methodName, null, null);
+    }
+
+    /**
+     * 生成方法描述（支持根据字段注释动态生成）
+     */
+    public String generateMethodDescription(String methodName, String fieldsCompletion, Map<String, ServiceMethodGenerator.FieldInfo> entityFields) {
         String lowerMethodName = methodName.toLowerCase();
+        String baseDescription;
+
         if (lowerMethodName.startsWith("listby")) {
-            return "根据条件查询列表";
+            baseDescription = "根据条件查询列表";
         } else if (lowerMethodName.startsWith("findby")) {
-            return "根据条件查找数据";
+            baseDescription = "根据条件查找数据";
         } else if (lowerMethodName.startsWith("getby")) {
-            return "根据条件获取单个数据";
+            baseDescription = "根据条件获取单个数据";
         } else if (lowerMethodName.startsWith("countby")) {
-            return "根据条件统计数量";
+            baseDescription = "根据条件统计数量";
         } else if (lowerMethodName.startsWith("existsby")) {
-            return "根据条件检查是否存在";
+            baseDescription = "根据条件检查是否存在";
         } else if (lowerMethodName.startsWith("removeby") || lowerMethodName.startsWith("deleteby")) {
-            return "根据条件删除数据";
+            baseDescription = "根据条件删除数据";
         } else {
-            return "根据条件查询数据";
+            baseDescription = "根据条件查询数据";
         }
+
+        // 如果有字段信息，尝试从字段注释生成更具体的描述
+        if (StrUtil.isNotEmpty(fieldsCompletion) && entityFields != null) {
+            String fieldDescription = generateFieldBasedDescription(fieldsCompletion, entityFields);
+            if (StrUtil.isNotEmpty(fieldDescription)) {
+                return baseDescription.replace("条件", fieldDescription);
+            }
+        }
+
+        return baseDescription;
+    }
+
+    /**
+     * 根据字段注释生成字段描述
+     */
+    private String generateFieldBasedDescription(String fieldsCompletion, Map<String, ServiceMethodGenerator.FieldInfo> entityFields) {
+        try {
+            // 解析字段名（简单的解析逻辑：按And/Or分割）
+            List<String> fields = parseFieldsFromCompletion(fieldsCompletion);
+            if (fields.isEmpty()) {
+                return "";
+            }
+
+            StringBuilder description = new StringBuilder();
+            for (int i = 0; i < fields.size(); i++) {
+                String field = fields.get(i);
+                ServiceMethodGenerator.FieldInfo fieldInfo = entityFields.get(field);
+
+                // 如果直接匹配失败，尝试小写首字母的版本
+                if (fieldInfo == null) {
+                    String lowerFirstField = StrUtil.lowerFirst(field);
+                    fieldInfo = entityFields.get(lowerFirstField);
+                }
+
+                if (fieldInfo != null && StrUtil.isNotEmpty(fieldInfo.fieldComment)) {
+                    if (description.length() > 0) {
+                        description.append("和");
+                    }
+                    description.append(fieldInfo.fieldComment);
+                } else {
+                    // 如果没有注释，使用字段名
+                    if (description.length() > 0) {
+                        description.append("和");
+                    }
+                    description.append(field);
+                }
+            }
+
+            return description.toString();
+        } catch (Exception e) {
+            System.err.println("Failed to generate field-based description: " + e.getMessage());
+            return "";
+        }
+    }
+
+    /**
+     * 解析字段名（从补全信息中提取字段名）
+     */
+    private List<String> parseFieldsFromCompletion(String fieldsCompletion) {
+        List<String> fields = new ArrayList<>();
+        if (StrUtil.isEmpty(fieldsCompletion)) {
+            return fields;
+        }
+
+        String[] parts = fieldsCompletion.split("(?=And|Or)");
+        for (String part : parts) {
+            // 移除And/Or前缀
+            String fieldPart = part;
+            if (fieldPart.startsWith("And")) {
+                fieldPart = fieldPart.substring(3);
+            } else if (fieldPart.startsWith("Or")) {
+                fieldPart = fieldPart.substring(2);
+            }
+
+            // 移除查询类型后缀
+            String[] suffixes = {"LikeLeft", "LikeRight", "NotLikeLeft", "NotLikeRight", "NotLike", "Like",
+                               "GreaterThanEqual", "LessThanEqual", "GreaterThan", "LessThan", "NotEqual",
+                               "Gt", "Lt", "Ge", "Le", "Ne", "Eq", "In", "NotIn", "Between", "NotBetween",
+                               "IsNull", "IsNotNull"};
+            for (String suffix : suffixes) {
+                if (fieldPart.endsWith(suffix)) {
+                    fieldPart = fieldPart.substring(0, fieldPart.length() - suffix.length());
+                    break;
+                }
+            }
+
+            if (StrUtil.isNotEmpty(fieldPart)) {
+                fields.add(fieldPart);
+            }
+        }
+        return fields;
     }
 }

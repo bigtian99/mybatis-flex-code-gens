@@ -432,20 +432,11 @@ public class ServiceCompletionContributor extends CompletionContributor {
         String[] queryPrefixes = {"listBy", "findBy", "getBy", "countBy", "existsBy", "removeBy", "deleteBy"};
         String lowerPrefix = prefix.toLowerCase();
 
-        System.out.println("addMethodPrefixCompletions called with:");
-        System.out.println("  prefix: " + prefix);
-        System.out.println("  lowerPrefix: " + lowerPrefix);
-        System.out.println("  simpleEntityName: " + simpleEntityName);
-        System.out.println("  currentServiceClass: " + (currentServiceClass != null ? currentServiceClass.getName() : "null"));
-        System.out.println("  isInterface: " + (currentServiceClass != null && currentServiceClass.isInterface()));
-
         for (String queryPrefix : queryPrefixes) {
-            System.out.println("  Checking queryPrefix: " + queryPrefix + ", startsWith: " + queryPrefix.toLowerCase().startsWith(lowerPrefix));
             if (queryPrefix.toLowerCase().startsWith(lowerPrefix)) {
 
                 // 添加整个实体的方法补全（如listBy + 实体名）
                 if (queryPrefix.equals("listBy") || queryPrefix.equals("findBy")) {
-                    System.out.println("  Calling generateEntityMethods for: " + queryPrefix);
                     // 生成两个版本：eq查询和like查询
                     generateEntityMethods(result, queryPrefix, simpleEntityName, entityFields, fieldToTableDefMapping,
                                         entityQualifiedName, entityClass, currentServiceClass);
@@ -462,7 +453,7 @@ public class ServiceCompletionContributor extends CompletionContributor {
                     String methodName = queryPrefix + capitalizedFieldName;
 
                     // 检查方法是否已存在
-                    if (currentServiceClass != null && methodExists(currentServiceClass, methodName)) {
+                    if (methodExists(currentServiceClass, methodName)) {
                         continue; // 跳过已存在的方法
                     }
 
@@ -521,11 +512,20 @@ public class ServiceCompletionContributor extends CompletionContributor {
         String fieldName;
         String fieldType;
         String columnName;
+        String fieldComment;
 
         FieldInfo(String fieldName, String fieldType, String columnName) {
             this.fieldName = fieldName;
             this.fieldType = fieldType;
             this.columnName = columnName;
+            this.fieldComment = "";
+        }
+
+        FieldInfo(String fieldName, String fieldType, String columnName, String fieldComment) {
+            this.fieldName = fieldName;
+            this.fieldType = fieldType;
+            this.columnName = columnName;
+            this.fieldComment = fieldComment != null ? fieldComment : "";
         }
     }
 
@@ -745,7 +745,7 @@ public class ServiceCompletionContributor extends CompletionContributor {
                 // 在接口中，只显示方法签名，不显示方法体
                 builder = builder.withTailText(" (generate method declaration)", true)
                         .withInsertHandler((context, item) -> {
-                            insertInterfaceMethodDeclaration(context, methodName, returnType, entityFields);
+                            insertInterfaceMethodDeclaration(context, methodName, returnType, entityFields, capitalizedFieldName);
                         });
             } else {
                 // 在实现类中，显示方法体
@@ -771,7 +771,7 @@ public class ServiceCompletionContributor extends CompletionContributor {
     /**
      * 在接口中插入方法声明，并在实现类中生成方法实现
      */
-    private void insertInterfaceMethodDeclaration(InsertionContext context, String methodName, String returnType, Map<String, FieldInfo> entityFields) {
+    private void insertInterfaceMethodDeclaration(InsertionContext context, String methodName, String returnType, Map<String, FieldInfo> entityFields, String fieldsCompletion) {
         ApplicationManager.getApplication().executeOnPooledThread(() -> {
             try {
                 Project project = context.getProject();
@@ -791,8 +791,16 @@ public class ServiceCompletionContributor extends CompletionContributor {
                                     // 解析方法名生成参数（使用实体字段信息）
                                     String parameters = generateMethodParametersFromName(methodName, entityFields);
 
+                                    // 转换 FieldInfo 到 ServiceMethodGenerator.FieldInfo
+                                    Map<String, ServiceMethodGenerator.FieldInfo> convertedFields = new HashMap<>();
+                                    for (Map.Entry<String, FieldInfo> entry : entityFields.entrySet()) {
+                                        FieldInfo oldField = entry.getValue();
+                                        convertedFields.put(entry.getKey(), new ServiceMethodGenerator.FieldInfo(
+                                            oldField.fieldName, oldField.fieldType, oldField.columnName, oldField.fieldComment));
+                                    }
+
                                     // 生成接口方法声明
-                                    String methodText = "/**\n     * " + bodyGenerator.generateMethodDescription(methodName) + "\n     */\n    " +
+                                    String methodText = "/**\n     * " + bodyGenerator.generateMethodDescription(methodName, fieldsCompletion, convertedFields) + "\n     */\n    " +
                                                       returnType + " " + methodName + "(" + parameters + ");";
 
                                     PsiMethod method = factory.createMethodFromText(methodText, psiClass);
@@ -1001,8 +1009,31 @@ public class ServiceCompletionContributor extends CompletionContributor {
 
             PsiElementFactory factory = JavaPsiFacade.getElementFactory(project);
 
+            // 获取实体类字段信息以生成更好的方法描述
+            String methodDescription;
+            try {
+                JavaPsiFacade psiFacade = JavaPsiFacade.getInstance(project);
+                GlobalSearchScope scope = GlobalSearchScope.allScope(project);
+                PsiClass entityClass = psiFacade.findClass(entityQualifiedName, scope);
+
+                if (entityClass != null) {
+                    // 获取字段信息
+                    Map<String, ServiceMethodGenerator.FieldInfo> entityFields = fieldParser.getEntityFieldsInfo(entityClass);
+                    // 从方法名中提取字段部分
+                    String fieldsCompletion = extractFieldsFromMethodName(methodName, methodPrefix);
+                    // 生成带字段信息的描述
+                    methodDescription = bodyGenerator.generateMethodDescription(methodName, fieldsCompletion, entityFields);
+                } else {
+                    // 如果无法获取实体类，使用默认描述
+                    methodDescription = bodyGenerator.generateMethodDescription(methodName);
+                }
+            } catch (Exception e) {
+                // 如果出错，使用默认描述
+                methodDescription = bodyGenerator.generateMethodDescription(methodName);
+            }
+
             // 生成完整的方法实现
-            String methodText = "/**\n     * " + bodyGenerator.generateMethodDescription(methodName) + "\n     */\n" +
+            String methodText = "/**\n     * " + methodDescription + "\n     */\n" +
                               "    @Override\n" +
                               "    public " + returnType + " " + methodName + "(" + parameters + ") {\n" +
                               methodBody + "\n" +
@@ -2797,14 +2828,33 @@ public class ServiceCompletionContributor extends CompletionContributor {
      * 转换旧的FieldInfo到新的FieldInfo
      */
     private ServiceMethodGenerator.FieldInfo convertToNewFieldInfo(FieldInfo oldFieldInfo) {
-        return new ServiceMethodGenerator.FieldInfo(oldFieldInfo.fieldName, oldFieldInfo.fieldType, oldFieldInfo.columnName);
+        return new ServiceMethodGenerator.FieldInfo(oldFieldInfo.fieldName, oldFieldInfo.fieldType, oldFieldInfo.columnName, oldFieldInfo.fieldComment);
     }
 
     /**
      * 转换新的FieldInfo到旧的FieldInfo
      */
     private FieldInfo convertToOldFieldInfo(ServiceMethodGenerator.FieldInfo newFieldInfo) {
-        return new FieldInfo(newFieldInfo.fieldName, newFieldInfo.fieldType, newFieldInfo.columnName);
+        return new FieldInfo(newFieldInfo.fieldName, newFieldInfo.fieldType, newFieldInfo.columnName, newFieldInfo.fieldComment);
+    }
+
+    /**
+     * 从方法名中提取字段部分
+     */
+    private String extractFieldsFromMethodName(String methodName, String methodPrefix) {
+        if (StrUtil.isEmpty(methodName) || StrUtil.isEmpty(methodPrefix)) {
+            return "";
+        }
+
+        // 移除方法前缀，获取字段部分
+        String lowerMethodName = methodName.toLowerCase();
+        String lowerMethodPrefix = methodPrefix.toLowerCase();
+
+        if (lowerMethodName.startsWith(lowerMethodPrefix)) {
+            return methodName.substring(methodPrefix.length());
+        }
+
+        return "";
     }
 
     /**
