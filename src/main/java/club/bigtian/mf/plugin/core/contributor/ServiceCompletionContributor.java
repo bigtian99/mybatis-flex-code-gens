@@ -248,10 +248,8 @@ public class ServiceCompletionContributor extends CompletionContributor {
 
             // 获取输入前缀
             String prefix = result.getPrefixMatcher().getPrefix();
-            if (isMethodNameCompletion(prefix)) {
                 // 生成Service方法补全，包括自动生成方法的选项
                 addServiceMethodCallCompletion(result, serviceCallInfo.serviceInterface, serviceCallInfo.entityQualifiedName, project, prefix, parameters);
-            }
 
         } catch (Exception e) {
             e.printStackTrace();
@@ -332,6 +330,14 @@ public class ServiceCompletionContributor extends CompletionContributor {
         } catch (Exception e) {
             return null;
         }
+    }
+
+    /**
+     * 添加低优先级的补全项，让系统自带的补全项优先显示
+     */
+    private void addLowPriorityElement(CompletionResultSet result, LookupElement element) {
+        LookupElement prioritizedElement = PrioritizedLookupElement.withPriority(element, -100.0);
+        result.addElement(prioritizedElement);
     }
 
     /**
@@ -480,7 +486,7 @@ public class ServiceCompletionContributor extends CompletionContributor {
                                                                     capitalizedFieldName, newEntityFields, entityQualifiedName, fieldToTableDefMapping);
                             });
 
-                    result.addElement(methodElement);
+                    addLowPriorityElement(result, methodElement);
                 }
             }
         }
@@ -621,7 +627,7 @@ public class ServiceCompletionContributor extends CompletionContributor {
                                                              completion, newEntityFields, entityQualifiedName, fieldToTableDefMapping);
                     });
 
-            result.addElement(methodElement);
+            addLowPriorityElement(result, methodElement);
         }
     }
 
@@ -674,7 +680,7 @@ public class ServiceCompletionContributor extends CompletionContributor {
                                                              "Entity", newEntityFields1, entityQualifiedName, fieldToTableDefMapping);
                     });
 
-            result.addElement(builder);
+            addLowPriorityElement(result, builder);
         }
 
         // 生成like版本的实体方法
@@ -705,7 +711,7 @@ public class ServiceCompletionContributor extends CompletionContributor {
                                                              "EntityLike", newEntityFields, entityQualifiedName, fieldToTableDefMapping);
                     });
 
-            result.addElement(builderLike);
+            addLowPriorityElement(result, builderLike);
         }
     }
 
@@ -764,7 +770,7 @@ public class ServiceCompletionContributor extends CompletionContributor {
                         });
             }
 
-            result.addElement(builder);
+            addLowPriorityElement(result, builder);
         }
     }
 
@@ -1545,7 +1551,7 @@ public class ServiceCompletionContributor extends CompletionContributor {
                                                                    "Entity", entityMethodFields, entityQualifiedName, fieldToTableDefMapping);
                         });
 
-                result.addElement(methodElement);
+                addLowPriorityElement(result, methodElement);
             }
 
             // 生成like版本的实体方法
@@ -1568,7 +1574,7 @@ public class ServiceCompletionContributor extends CompletionContributor {
                                                                    "EntityLike", entityMethodFields, entityQualifiedName, fieldToTableDefMapping);
                         });
 
-                result.addElement(methodElement);
+                addLowPriorityElement(result, methodElement);
             }
         }
 
@@ -1618,7 +1624,7 @@ public class ServiceCompletionContributor extends CompletionContributor {
                                                            fieldInfo.fieldName, singleFieldMap, entityQualifiedName, fieldToTableDefMapping);
                 });
 
-        result.addElement(methodElement);
+        addLowPriorityElement(result, methodElement);
     }
 
     /**
@@ -1677,7 +1683,7 @@ public class ServiceCompletionContributor extends CompletionContributor {
                                                                     capitalizedFieldName, newEntityFields, entityQualifiedName, fieldToTableDefMapping);
                             });
 
-                    result.addElement(methodElement);
+                    addLowPriorityElement(result, methodElement);
                 }
             }
         }
@@ -1734,7 +1740,7 @@ public class ServiceCompletionContributor extends CompletionContributor {
                                                              completion, newEntityFields, entityQualifiedName, fieldToTableDefMapping);
                     });
 
-            result.addElement(methodElement);
+            addLowPriorityElement(result, methodElement);
         }
     }
 
@@ -1777,7 +1783,7 @@ public class ServiceCompletionContributor extends CompletionContributor {
                                                                capitalizedFieldName, singleFieldMap, entityQualifiedName, fieldToTableDefMapping);
                     });
 
-            result.addElement(methodElement);
+            addLowPriorityElement(result, methodElement);
         }
     }
 
@@ -1809,7 +1815,7 @@ public class ServiceCompletionContributor extends CompletionContributor {
                                                                "Entity", entityMethodFields, entityQualifiedName, fieldToTableDefMapping);
                     });
 
-            result.addElement(methodElement);
+            addLowPriorityElement(result, methodElement);
         }
 
         // 生成like版本的实体方法
@@ -1832,7 +1838,7 @@ public class ServiceCompletionContributor extends CompletionContributor {
                                                                "EntityLike", entityMethodFields, entityQualifiedName, fieldToTableDefMapping);
                     });
 
-            result.addElement(methodElementLike);
+            addLowPriorityElement(result, methodElementLike);
         }
     }
 
@@ -1879,7 +1885,7 @@ public class ServiceCompletionContributor extends CompletionContributor {
                                                          fieldsCompletion, newEntityFields, entityQualifiedName, fieldToTableDefMapping);
                 });
 
-        result.addElement(methodElement);
+        addLowPriorityElement(result, methodElement);
     }
 
     /**
@@ -2157,7 +2163,7 @@ public class ServiceCompletionContributor extends CompletionContributor {
                                                          fieldsCompletion, newEntityMethodFields, entityQualifiedName, fieldToTableDefMapping);
                 });
 
-        result.addElement(methodElement);
+        addLowPriorityElement(result, methodElement);
     }
 
     /**
@@ -2539,7 +2545,7 @@ public class ServiceCompletionContributor extends CompletionContributor {
                     .withTypeText(simpleEntityClassName)
                     .withIcon(Icons.FLEX);
 
-            completionResultSet.addElement(lookupElement);
+            addLowPriorityElement(completionResultSet, lookupElement);
         }
 
         // 添加TableDef实例的补全
@@ -2551,7 +2557,7 @@ public class ServiceCompletionContributor extends CompletionContributor {
                     .withTailText(" (APT generated)", true)
                     .withIcon(Icons.FLEX);
 
-            completionResultSet.addElement(tableDefElement);
+            addLowPriorityElement(completionResultSet, tableDefElement);
         }
     }
 
