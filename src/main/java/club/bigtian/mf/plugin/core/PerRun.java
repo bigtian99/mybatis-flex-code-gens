@@ -12,7 +12,6 @@ import com.intellij.execution.runners.JavaProgramPatcher;
 import com.intellij.execution.ui.ConsoleView;
 import com.intellij.openapi.project.Project;
 import com.intellij.psi.PsiClass;
-import com.intellij.spring.boot.run.SpringBootApplicationRunConfiguration;
 
 import java.util.Map;
 
@@ -21,6 +20,8 @@ import java.util.Map;
  * 它专门用于向JVM参数中添加Java代理。
  */
 public class PerRun extends JavaProgramPatcher {
+    private static final String SPRING_BOOT_RUN_CONFIGURATION = "com.intellij.spring.boot.run.SpringBootApplicationRunConfiguration";
+
     /**
      * 这个方法被调用来修改RunProfile的JavaParameters。
      * 它向JVM参数中添加一个Java代理。
@@ -35,8 +36,11 @@ public class PerRun extends JavaProgramPatcher {
         if (ObjectUtil.defaultIfNull(config.getEnableDebug(), true)) {
             setLogLevel(runProfile, javaParameters);
         }
-        if (runProfile instanceof SpringBootApplicationRunConfiguration springBootApplicationRunConfiguration) {
-            Project project = springBootApplicationRunConfiguration.getProject();
+        if (isSpringBootRunConfiguration(runProfile)) {
+            Project project = extractProject(runProfile);
+            if (project == null) {
+                return;
+            }
             ConsoleView consoleView = new ConsoleViewImpl(project, true);
             consoleView.addMessageFilter(new MybatisFlexAgentFilter());
         }
@@ -51,13 +55,35 @@ public class PerRun extends JavaProgramPatcher {
      */
 
     private static void setLogLevel(RunProfile runProfile, JavaParameters javaParameters) {
-        if (runProfile instanceof SpringBootApplicationRunConfiguration) {
-            SpringBootApplicationRunConfiguration springBootApplicationRunConfiguration = (SpringBootApplicationRunConfiguration) runProfile;
-            PsiClass mainClass = springBootApplicationRunConfiguration.getMainClass();
+        if (isSpringBootRunConfiguration(runProfile)) {
+            PsiClass mainClass = extractMainClass(runProfile);
+            if (mainClass == null) {
+                return;
+            }
             Map<String, String> env = javaParameters.getEnv();
             String packageName = PsiJavaFileUtil.getPackageName(mainClass);
             env.put(StrUtil.format("logging.level.{}", packageName), "debug");
         }
 
+    }
+
+    private static boolean isSpringBootRunConfiguration(RunProfile runProfile) {
+        return ObjectUtil.isNotNull(runProfile) && SPRING_BOOT_RUN_CONFIGURATION.equals(runProfile.getClass().getName());
+    }
+
+    private static Project extractProject(RunProfile runProfile) {
+        try {
+            return (Project) runProfile.getClass().getMethod("getProject").invoke(runProfile);
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private static PsiClass extractMainClass(RunProfile runProfile) {
+        try {
+            return (PsiClass) runProfile.getClass().getMethod("getMainClass").invoke(runProfile);
+        } catch (Exception ignored) {
+            return null;
+        }
     }
 }

@@ -39,11 +39,9 @@
     ]]></description>
 
     <change-notes><![CDATA[
-    <h3>1.6.7.1-RELEASE</h3>
+    <h3>1.6.8-RELEASE</h3>
     <ul>
-    <li>【修复】column.notNull【表字段是否为空】返回值不对</li>
-    <li>【优化】 过时api调整</li>
-    <li>【优化】 支持K2</li>
+    <li>【修复】支持26.x版本</li>
     </ul>
     ]]></change-notes>
     <!-- Product and plugin compatibility requirements.
