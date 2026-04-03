@@ -52,6 +52,7 @@
     <depends>org.jetbrains.kotlin</depends>
     <depends>com.intellij.database</depends>
     <depends>com.intellij.spring.boot</depends>
+    <depends>com.intellij.microservices.jvm</depends>
     <depends>org.jetbrains.plugins.yaml</depends>
     <depends>com.intellij.spring</depends>
 
