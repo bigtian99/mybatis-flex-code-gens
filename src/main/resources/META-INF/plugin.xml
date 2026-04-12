@@ -12,34 +12,37 @@
     <!-- Description of the plugin displayed on the Plugin Page and IDE Plugin Manager.
          Simple HTML elements (text formatting, paragraphs, and lists) can be added inside of <![CDATA[ ]]> tag.
          Guidelines: https://plugins.jetbrains.com/docs/marketplace/plugin-overview-page.html#plugin-description -->
-    <description><![CDATA[
-    <a href="https://blog.bigtian.club/">使用文档</a> |
-    <a href="https://mybatis-flex.com/">MyBatis-Flex 官网</a> |
-    <a href="https://www.bilibili.com/video/BV1WX4y1j7VQ/">介绍视频</a>
-    <h3>Features:</h3>
+    <description><![CDATA[Mybatis-Flex-Helper streamlines MyBatis-Flex code generation, APT workflows, SQL preview, and template sharing in IntelliJ-based IDEs.
+    <p>
+    <a href="https://blog.bigtian.club/">Documentation</a> |
+    <a href="https://mybatis-flex.com/">MyBatis-Flex Website</a> |
+    <a href="https://www.bilibili.com/video/BV1WX4y1j7VQ/">Video Introduction</a>
+    </p>
+    <h3>Features</h3>
     <ul>
-    <li>The resulting APT file supports hints</li>
-    <li>Code templates are highly customizable</li>
-    <li>APT automatic compilation</li>
-    <li>Share template-related configurations</li>
-    <li>Automatically identify the packet path</li>
-    <li>Preview SQL</li>
-    <li>The apt field is renamed in batches</li>
+    <li>The generated APT files support code completion.</li>
+    <li>Code templates are highly customizable.</li>
+    <li>APT compilation can run automatically.</li>
+    <li>Template-related configurations can be shared.</li>
+    <li>Package paths are detected automatically.</li>
+    <li>SQL can be previewed directly in the IDE.</li>
+    <li>APT fields can be batch renamed.</li>
     </ul>
 
+    <h3>功能特性</h3>
     <ul>
-    <li>APT文件支持代码提示</li>
-    <li>代码模版高度自定义</li>
-    <li>APT自动编译</li>
-    <li>模板相关配置分享</li>
-    <li>自动识别包路径</li>
-    <li>预览SQL</li>
-    <li>apt字段批量重命名</li>
+    <li>APT 文件支持代码提示。</li>
+    <li>代码模板支持高度自定义。</li>
+    <li>支持 APT 自动编译。</li>
+    <li>支持分享模板相关配置。</li>
+    <li>支持自动识别包路径。</li>
+    <li>支持预览 SQL。</li>
+    <li>支持批量重命名 APT 字段。</li>
     </ul>
     ]]></description>
 
     <change-notes><![CDATA[
-    <h3>1.6.8-RELEASE</h3>
+    <h3>1.8-RELEASE</h3>
     <ul>
     <li>【修复】支持26.x版本</li>
     </ul>
