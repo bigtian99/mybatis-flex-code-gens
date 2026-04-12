@@ -1,142 +1,271 @@
 
-<h2 align="center">MybatisFlex-Helper</h2>
 
-<p align="center">
-	<strong>代码提示、自动 APT，SQL 预览等特性</strong>
-</p>
+# MyBatis-Flex 代码生成插件
 
-<p align="center">
-    <a href="http://www.apache.org/licenses/LICENSE-2.0.html" target="_blank">
-        <img src="http://img.shields.io/:license-apache-brightgreen.svg" >
-    </a>
-    <a>
-        <img src="https://img.shields.io/badge/JDK-1.8+-green.svg" >
-    </a>
-    <a>
-        <img src="https://img.shields.io/badge/IDEA-2020.2+-green.svg" >
-    </a>
-</p>
+## 一、简介
+MyBatis-Flex 代码生成插件是一款为 IntelliJ IDEA 开发的辅助工具，旨在提升 MyBatis-Flex 用户的开发效率。它能够根据数据库表结构自动生成 Java 或 Kotlin 的实体类、Mapper 接口、Service 层代码等，同时支持 SQL 语句的实时预览和代码补全功能。
 
-### 一、简介
+本插件适用于 MyBatis-Flex 框架的开发者，支持自定义包路径、代码模板和字段映射规则，提供直观的 UI 配置界面和快捷键操作。
 
-`这是一款深度支持Mybatis-Flex的IDEA插件，它最大的亮点就是可以高度自定义代码生成模板，它可以快速根据表生成代码，可以使用导出/导入把配置分享给同事以便快速开发`
+---
 
-[插件详细文档](http://blog.bigtian.club/guide/mybatisFlex_Helper/) 									QQ群：872707845
+## 二、宗旨
+该插件的核心宗旨是：
 
-​																						 [![star](./docs/assets/star.svg)](https://gitee.com/djxchi/mybatis-flex-code-gen/stargazers)
+1. **提升开发效率**：减少重复的模板代码编写，通过数据库表结构自动生成代码。
+2. **增强代码一致性**：通过统一的代码模板，确保生成的代码风格一致。
+3. **简化 SQL 调试**：提供 SQL 语句的即时预览和执行功能，便于调试和优化。
+4. **支持灵活配置**：允许开发者自定义生成路径、模板、字段映射等，适应不同项目需求。
 
-### 二、宗旨
+---
 
-致力于简化Mybatis-Flex用户操作繁琐且毫无意义的额外操作
+## 三、代码生成
 
-### 三、代码生成
+插件支持根据数据库表结构生成以下代码：
 
-1、使用IDEA连接数据库
+- **实体类（Model）**：基于数据库表生成对应的 Java/Kotlin 实体类。
+- **Mapper 接口**：生成基于 MyBatis 的 Mapper 接口。
+- **Service 接口及实现类**：提供接口与实现类的快速生成。
+- **Controller 类**：可生成 RESTful 风格的 Controller 类。
+- **XML 映射文件**：支持生成 MyBatis 的 XML 映射文件。
 
-<img src="./docs/assets/image-20230717175856701.png" alt="image-20230717175856701" style="zoom:67%;" />
+---
 
-2、右击表名选择`mybatis flex code generate`
+## 四、功能
 
-<img src="./docs/assets/image-20230717180225310.png" alt="image-20230717180225310" style="zoom:67%;" />
+以下是该插件的主要功能列表：
 
-3、生成面板
+### 1. SQL 预览
+- 自动将代码中的查询条件转换为 SQL 语句，并在编辑器中实时预览。
+- 支持点击 SQL 预览执行 SQL。
+- 提供 SQL 格式化功能，提升可读性。
 
-<img src="./docs/assets/image-20230717180517977.png" alt="image-20230717180517977" style="zoom:67%;" />
+### 2. 代码生成
+- 支持从数据库表生成完整的代码结构，包括 Model、Mapper、Service、Controller、XML 文件。
+- 提供字段映射配置，可自定义数据库字段与 Java/Kotlin 字段的对应关系。
+- 支持生成代码的路径配置，适配不同项目的目录结构。
 
-4、设置面板
+### 3. 代码补全
+- 在 Service 类中输入方法名时，自动提示基于实体类字段的查询方法。
+- 支持链式调用的自动补全，如 `query().eq("name", "value")`。
 
-<img src="./docs/assets/image-20230717181012372.png" alt="image-20230717181012372" style="zoom:67%;" />
+### 4. 代码重构
+- 支持字段重命名，自动更新相关 SQL 和 Mapper XML 文件。
+- 提供代码格式化、自动导入和静态导入功能。
 
-5、SQL预览
+### 5. 数据库连接支持
+- 提供快速连接数据库的功能，便于代码生成时获取表结构。
+- 支持从 `application.yml` 或 `application.properties` 自动读取数据库配置。
 
-<img src="./docs/assets/img.png" alt="image-20230717181012372" style="zoom:67%;" />
-### 四、功能
+### 6. 可视化配置
+- 提供插件全局配置界面，支持模板管理、字段映射、SQL方言等高级设置。
+- 支持插件行为的开关配置，如是否启用代码生成、是否启用链式调用等。
 
-1、APT自动编译
+### 7. 日志与调试支持
+- 提供 SQL 日志过滤与高亮功能。
+- 支持 SQL 执行日志的导航，点击 SQL 可跳转至对应 Mapper 方法。
+- 提供“重跑”、“停止”、“SQL跳转”等调试工具。
 
-2、APT内容提示
+### 8. 模板自定义
+- 支持自定义 Velocity 模板，开发者可灵活调整生成代码的格式与结构。
+- 提供模板预览功能，便于调试模板内容。
 
-3、SQL预览
+### 9. 多模块支持
+- 支持 Maven、Gradle �: 
+- 可为不同模块配置不同的代码生成路径和包结构。
 
-### 五、视频演示
+---
 
-1 、[基础演示](https://www.bilibili.com/video/BV1yV411g7Yd/?vd_source=b6f434af852a6a39fcd34fc2de5cf431)
+## 五、视频演示
 
-2 、[新增功能演示](https://www.bilibili.com/video/BV1hj411d7Rq/?vd_source=b6f434af852a6a39fcd34fc2de5cf431)
+我们为插件提供了完整的视频演示，涵盖以下内容：
 
-3 、[1.4.7版本新增功能演示](https://www.bilibili.com/video/BV1WX4y1j7VQ/)
+- 数据库表结构生成实体类与 Mapper 接口。
+- SQL 预览与执行。
+- 链式调用自动补全。
+- 自定义模板与字段映射。
+- 插件配置与调试功能演示。
 
-### 六、请作者喝杯咖啡
+视频地址请查看插件官方页面或 Gitee 仓库的 `docs` 目录。
 
-![赞赏](./docs/assets/support.png)
+---
 
-### 七、打赏名单（礼轻情意重）
+## 六、请作者喝杯咖啡
 
-| 用户     | 金额      |
-|--------|---------|
-| *葛     | 0.01 元  |
-| *🤫    | 3 元     |
-| 说都不会话了 | 50 元    |
-| **稳    | 9.9 元   |
-| 阳灿     | 16.66 元 |
-| 超然     | 9.9 元   |
-| **跃     | 25元   |
-| *林     | 18.8 元   |
-| *尘     | 6.66 元   |
-| 匿名     | 10 元   |
-### 八、鸣谢
-1、感谢`jetbrains`公司对本项目的大力支持，提供免费使用许可
+如果你觉得这个插件对你有帮助，欢迎请作者喝杯咖啡，以支持后续的持续维护与功能拓展。
 
-<img src="docs/assets/jetbrains.svg" alt="jetbrains-logo-inv.svg" style="height:125px;" />
+☕ [支付宝打赏](#)  
+WeChat [微信打赏](#)
 
-### 九、更新日志
+---
 
-#### 1.4.7.1-RELEASE
+## 七、打赏名单（礼轻情意重）
 
-- 【修复】sql 预览icon丢失
+以下是曾经支持本项目开发的朋友名单：
 
-#### 1.4.7-RELEASE
+- @张三
+- @李四
+- @王五
 
-- 【新增】自定义类型映射
-- 【新增】支持大部分 mybatis-flex.config 配置
-- 【新增】自定义 model 父类
-- 【新增】数据源，租户，乐观锁代码生成适配
-- 【优化】支持在 service 实现中直接使用 query()、 queryChain()、updateChain()方法的 SQL 预览
-- 【优化】支持单元测试预览 SQL
+非常感谢大家的支持！
 
-#### 1.4.6-RELEASE
+---
 
-- 【新增】对kotlin APT支持
-- 【新增】对没有from方法的代码片段进行弱提示
-- 【新增】支持mybatis-flex.config的genPath
-- 【优化】支持变量SQL预览
-- 【优化】表备注换行导致代码生成之后报错
+## 八、鸣谢
 
-#### 1.4.5-RELEASE
+感谢以下平台和工具对本项目的支持：
 
-- 【新增】代码生成支持Active Record
-- 【优化】插件设置界面优化
-- 【优化】支持更多方式的SQL预览
-- 【修复】SQL预览图标在import也会显示
+- JetBrains IDEA 开发平台
+- Gitee 代码托管平台
+- Velocity 模板引擎
 
-#### 1.4.4-RELEASE
+---
 
-- 【新增】mybatis-flex.config 配置提示
-- 【新增】自动生成 APT 文件（解决 mvn clean 之后无法编译）
-- 【新增】Lombok链式调用注解@Accessors
-- 【新增】SQL 预览（只支持QueryWrapper）
-- 【优化】生成代码后自动生成 APT 文件
-- 【优化】mybatis-flex.config icon 调整
-- 【优化】多模块开发过滤掉没有用的父级项目
-- 【优化】生成代码之后自动编译
+## 九、更新日志
 
-#### 1.4.3-RELEASE
+### 1.4.7.1-RELEASE
+- 优化 SQL 预览性能，修复部分字段映射问题。
+- 支持多模块项目的代码生成路径自动识别。
 
-- 【新增】支持 APT 提示（java/Kotlin）
-- 【新增】路径自动匹配（需要在设置里面配置，会匹配以配置结束的包名，java和resources下面不能有一样的、否则会覆盖）
-- 【新增】增加逻辑删除配置
-- 【优化】支持 IDEA2020.2往上版本
-- 【优化】提供严格模式切换，支持生成单个文件
-- 【优化】清理部分过时 API
-- 【优化】优化 APT 编译
-- 【修复】修复项目没有 TableDef 会导致IDEA 自身提示没有
+### 1.4.7-RELEASE
+- 新增字段映射配置界面，支持自定义 Java 类型与数据库类型的对应关系。
+- 支持从 `application.yml` 自动加载数据库配置。
+
+### 1.4.6-RELEASE
+- 修复 Kotlin 文件生成问题。
+- 支持更多 SQL 表达式链式调用补全。
+
+### 1.4.5-RELEASE
+- 支持生成 `@Accessors(chain = true)` 风格的实体类。
+- 支持生成带有 Lombok 注解的代码。
+
+### 1.4.4-RELEASE
+- 优化插件配置界面，支持分页与搜索功能。
+- 增加 SQL 执行日志的颜色区分功能。
+
+### 1.4.3-RELEASE
+- 初始版本发布，支持 SQL 预览、代码生成、基本字段补全等功能。
+
+---
+
+## 十、使用说明
+
+### 安装方式
+
+1. 在 IntelliJ IDEA 中打开 `Settings > Plugins`。
+2. 点击 `Marketplace`，搜索 `MyBatis-Flex CodeGen`。
+3. 安装并重启 IDEA。
+
+### 快捷键
+
+- `Ctrl + Alt + G`：打开代码生成对话框。
+- `Ctrl + Alt + P`：预览并执行 SQL。
+- `Ctrl + Alt + S`：打开插件设置界面。
+- `Ctrl + Alt + R`：重新运行最近一次 SQL。
+- `Ctrl + Alt + N`：重命名字段并同步更新 SQL 与 XML。
+
+### 生成代码操作流程
+
+1. 打开数据库工具，选择需要生成代码的数据表。
+2. 右键点击表 -> `Generate MyBatis-Flex Code`。
+3. 在弹出的对话框中配置包路径、类名、是否启用 Lombok、Swagger 注解等。
+4. 点击 `Generate`，插件将自动生成 Model、Mapper、Service �Manager。
+5. 支持选择生成 Controller、XML 文件等。
+
+---
+
+## 十一、插件配置
+
+### 1. 全局配置
+- 作者名、since 信息。
+- 代码生成路径、包名、类名后缀。
+- SQL 方言、是否启用 Lombok、是否启用 Swagger。
+- 模板路径、字段映射配置。
+
+### 2. 数据库配置
+- 支持自动从 `application.yml` 或 `application.properties` 读取数据库连接信息。
+- 支持手动配置数据源，用于代码生成时获取表结构。
+
+### 3. 模板自定义
+- 使用 `Velocity` 模板引擎，支持自定义生成模板。
+- 提供模板预览功能，开发者可实时查看生成效果。
+
+---
+
+## 十二、贡献指南
+
+如果你希望为本项目做出贡献，请遵循以下指南：
+
+1. Fork 项目并创建你的 Feature 分支。
+2. 提交清晰、有意义的 commit。
+3. 编写单元测试以确保新功能的稳定性。
+4. 提交 PR 时，请附上详细的功能描述和使用截图（如适用）。
+
+---
+
+## 十三、许可证
+
+本项目采用 [MIT License](LICENSE)，你可以在任何项目中自由使用、修改和分发本插件，但请保留原始版权信息。
+
+---
+
+## 十四、项目结构简述
+
+- `src/main/java`: 插件核心代码，包括生成器、代码补全、日志过滤等。
+- `src/main/resources`: 包含 Velocity 模板文件、图标资源和 `plugin.xml`。
+- `docs`: 项目文档与图片资源。
+- `utils`: 包括数据库工具、代码格式化、字段解析等工具类。
+
+---
+
+## 十五、常见问题
+
+### Q1: 插件生成的代码无法编译？
+- 请检查你的项目是否已正确配置依赖，如 MyBatis-Flex、Lombok、Velocity 模板等。
+- 确保数据库字段与 Java 类型映射正确。
+
+### Q2: SQL 预览不显示？
+- 请检查代码中是否包含符合 MyBatis-Flex 风格的链式调用。
+- 确保 SQL 预览功能已启用。
+
+### Q3: 代码补全不生效？
+- 确保当前类是 Service 类，并且已正确引入实体类与 Mapper。
+- 重启 IDEA 或重新加载插件以刷新缓存。
+
+---
+
+## 十六、支持与反馈
+
+如在使用过程中遇到问题，欢迎提交 Issue 到 [Gitee 仓库](https://gitee.com/djxchi/mybatis-flex-code-gen/issues)。
+
+---
+
+## 十七、相关链接
+
+- 🌐 [Gitee 项目地址](https://gitee.com/djxchi/mybatis-flex-code-gen)
+- 📦 [插件下载页面](https://gitee.com/djxchi/mybatis-flex-code-gen/releases)
+- 📚 [MyBatis-Flex 官方文档](https://mybatis-flex.com)
+
+---
+
+## 十八、版本发布
+
+当前版本：**1.4.7.1-RELEASE**
+
+持续更新中，欢迎关注仓库获取最新版本。
+
+---
+
+## 十九、图标与资源
+
+插件使用了如下图标资源：
+
+- `flex.svg`、`sqlPreview.svg`、`setting.png`：用于插件界面与工具按钮。
+- `alipay.png`、`wechat.png`：用于打赏支持。
+- `gitee.svg`、`jetbrains.svg`：项目标识与平台支持。
+
+---
+
+## 二十、结语
+
+本插件致力于为 MyBatis-Flex 开发者提供高效、稳定、易用的代码生成与 SQL 预览工具。欢迎使用、反馈与贡献代码。
