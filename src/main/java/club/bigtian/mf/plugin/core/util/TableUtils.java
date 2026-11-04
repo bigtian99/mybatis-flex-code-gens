@@ -10,7 +10,7 @@ import cn.hutool.core.util.ObjectUtil;
 import cn.hutool.core.util.ReUtil;
 import cn.hutool.core.util.StrUtil;
 import com.intellij.database.DbModelRegistry;
-import com.intellij.database.dialects.DatabaseDialectEx;
+import com.intellij.database.dialects.DatabaseDialect;
 import com.intellij.database.model.*;
 import com.intellij.database.psi.DbDataSourceImpl;
 import com.intellij.database.psi.DbPsiFacade;
@@ -82,11 +82,14 @@ public class TableUtils {
 
     /**
      * 得到方言
+     * <p>
+     * 2026.3 起 {@code DbDataSourceImpl#getDatabaseDialect()} 返回的是 {@code DatabaseDialect}，
+     * 这里统一使用父接口，兼容新旧版本的数据库插件。
      *
      * @param dasTable das表
-     * @return {@code DatabaseDialectEx}
+     * @return {@code DatabaseDialect}
      */
-    public static DatabaseDialectEx getDialect(DasTable dasTable) {
+    public static DatabaseDialect getDialect(DasTable dasTable) {
         DbPsiFacade dbPsiFacade = DbPsiFacade.getInstance(ProjectUtils.getCurrentProject());
         DbTableImpl table = (DbTableImpl) ((DbModelRegistry) ProjectUtils.getCurrentProject().getService(DbModelRegistry.class)).findDbElement(dasTable);
         DbDataSourceImpl dataSource = table.getDataSource();
@@ -102,7 +105,7 @@ public class TableUtils {
     public static List<TableInfo> getTableInfoList(List<DasTable> selectedTableList) {
         List<TableInfo> tableInfoList = new ArrayList<>();
         DasTable dasTable = selectedTableList.get(0);
-        DatabaseDialectEx dialect = getDialect(dasTable);
+        DatabaseDialect dialect = getDialect(dasTable);
         for (DasTable table : selectedTableList) {
             TableInfo tableInfo = new TableInfo();
             tableInfo.setName(table.getName());
