@@ -27,13 +27,20 @@ public class SQLPreviewDialog extends JDialog {
     MybatisFlexConfig config;
 
     public SQLPreviewDialog(String sql, AnActionEvent event) {
+        this(sql, event, null);
+    }
+
+    /**
+     * @param meta 附加信息，会显示在标题上（例如 {@code fast 18ms} / {@code legacy}），方便直观看出走的是哪条链路
+     */
+    public SQLPreviewDialog(String sql, AnActionEvent event, String meta) {
         config = Template.getMybatisFlexConfig();
         isExecute.setSelected(config.isExecuteSql());
         setContentPane(contentPane);
         this.event = event;
         setModal(true);
         getRootPane().setDefaultButton(buttonOK);
-        setTitle("SQL Preview");
+        setTitle(meta == null || meta.isEmpty() ? "SQL Preview" : "SQL Preview · " + meta);
         setSize(500, 500);
         DialogUtil.centerShow(this);
 

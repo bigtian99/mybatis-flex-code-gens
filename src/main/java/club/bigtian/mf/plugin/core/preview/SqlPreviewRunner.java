@@ -146,9 +146,22 @@ public final class SqlPreviewRunner {
             JavaParameters parameters = new JavaParameters();
             parameters.configureByModule(module, JavaParameters.JDK_AND_CLASSES_AND_TESTS);
             Set<String> paths = new LinkedHashSet<>(parameters.getClassPath().getPathList());
+            if (!paths.isEmpty()) {
+                return new ArrayList<>(paths);
+            }
+        } catch (Exception e) {
+            LOG.debug("JavaParameters classpath failed: " + e.getMessage());
+        }
+        // 兜底：直接取 order entries 的根（模块输出目录 + 依赖库 + SDK）
+        try {
+            Set<String> paths = new LinkedHashSet<>();
+            for (com.intellij.openapi.vfs.VirtualFile root : com.intellij.openapi.roots.OrderEnumerator
+                    .orderEntries(module).recursively().classes().getRoots()) {
+                paths.add(root.getPath());
+            }
             return new ArrayList<>(paths);
         } catch (Exception e) {
-            LOG.debug("resolve classpath failed: " + e.getMessage());
+            LOG.debug("OrderEnumerator classpath failed: " + e.getMessage());
             return new ArrayList<>();
         }
     }

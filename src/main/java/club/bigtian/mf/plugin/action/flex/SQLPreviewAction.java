@@ -70,6 +70,9 @@ public class SQLPreviewAction extends AnAction {
     /**
      * 预览专用线程池：和超时等待的线程分开，避免在 IDE 的公共线程池里互相等待
      */
+    private static final java.util.concurrent.atomic.AtomicBoolean FALLBACK_NOTIFIED =
+            new java.util.concurrent.atomic.AtomicBoolean(false);
+
     private static final ExecutorService PREVIEW_EXECUTOR = java.util.concurrent.Executors.newFixedThreadPool(2, runnable -> {
         Thread thread = new Thread(runnable, "SqlPreview-Worker");
         thread.setDaemon(true);
@@ -226,13 +229,16 @@ public class SQLPreviewAction extends AnAction {
         AppExecutorUtil.getAppExecutorService().submit(() -> {
             boolean fallback = true;
             try {
+                long start = System.currentTimeMillis();
                 String sql = runFastPreview(project, psiFile, request);
-                showResult(project, sql);
+                showResult(project, sql, "fast " + (System.currentTimeMillis() - start) + "ms");
                 fallback = false;
             } catch (SqlPreviewException e) {
-                LOG.debug("fast sql preview failed, fallback to legacy: " + e.getMessage());
+                LOG.warn("fast sql preview failed, fallback to legacy: " + e.getMessage());
+                notifyFallbackOnce(project, e.getMessage());
             } catch (Throwable e) {
-                LOG.warn("fast sql preview error", e);
+                LOG.warn("fast sql preview error, fallback to legacy", e);
+                notifyFallbackOnce(project, e.getClass().getSimpleName() + ": " + e.getMessage());
             } finally {
                 if (fallback) {
                     ApplicationManager.getApplication().invokeLater(
@@ -243,6 +249,17 @@ public class SQLPreviewAction extends AnAction {
                 }
             }
         });
+    }
+
+    /**
+     * 快速通道失败时提示一次，避免用户完全无感地一直在走旧流程
+     */
+    private void notifyFallbackOnce(Project project, String reason) {
+        if (!FALLBACK_NOTIFIED.compareAndSet(false, true)) {
+            return;
+        }
+        NotificationUtils.notifyWarning("SQL 快速预览不可用，已回退旧流程。原因：" + reason
+                + "（后续不再提示，详见 idea.log 中的 SqlPreviewRunner）", "SQL Preview", project);
     }
 
     /**
@@ -268,13 +285,13 @@ public class SQLPreviewAction extends AnAction {
         }
     }
 
-    private void showResult(Project project, String sql) {
+    private void showResult(Project project, String sql, String meta) {
         if (StrUtil.isBlank(sql)) {
             NotificationUtils.notifyWarning("未解析到 SQL，请检查预览语句", "SQL Preview", project);
             return;
         }
         ApplicationManager.getApplication().invokeLater(
-                () -> new SQLPreviewDialog(sql, event).setVisible(true),
+                () -> new SQLPreviewDialog(sql, event, meta).setVisible(true),
                 ModalityState.defaultModalityState());
     }
 
@@ -664,7 +681,7 @@ public class SQLPreviewAction extends AnAction {
                     public void onTextAvailable(ProcessEvent event1, Key outputType) {
                         if (ProcessOutputTypes.STDOUT.equals(outputType)) {
                             if (StrUtil.startWithAnyIgnoreCase(event1.getText(), "SELECT", "INSERT", "UPDATE", "DELETE", "CREATE", "DROP", "ALTER", "TRUNCATE","WITH")) {
-                                new SQLPreviewDialog(event1.getText(),event).setVisible(true);
+                                new SQLPreviewDialog(event1.getText(), event, "legacy").setVisible(true);
                             }
                         } else if (ProcessOutputTypes.STDERR.equals(outputType)) {
                             String text = event1.getText();
