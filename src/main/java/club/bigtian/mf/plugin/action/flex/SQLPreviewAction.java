@@ -5,6 +5,11 @@ import club.bigtian.mf.plugin.core.constant.MybatisFlexConstant;
 import club.bigtian.mf.plugin.core.function.ManyFunction;
 import club.bigtian.mf.plugin.core.function.SimpleFunction;
 import club.bigtian.mf.plugin.core.log.MyBatisLogExecutor;
+import club.bigtian.mf.plugin.core.preview.MybatisFlexMethods;
+import club.bigtian.mf.plugin.core.preview.SqlPreviewChainFixer;
+import club.bigtian.mf.plugin.core.preview.SqlPreviewException;
+import club.bigtian.mf.plugin.core.preview.SqlPreviewLoaderCache;
+import club.bigtian.mf.plugin.core.preview.SqlPreviewRunner;
 import club.bigtian.mf.plugin.core.util.*;
 import club.bigtian.mf.plugin.windows.MybatisFlexSettingDialog;
 import club.bigtian.mf.plugin.windows.SQLPreviewDialog;
@@ -28,20 +33,50 @@ import com.intellij.openapi.actionSystem.CommonDataKeys;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.command.WriteCommandAction;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.projectRoots.Sdk;
 import com.intellij.openapi.roots.ProjectRootManager;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.util.Key;
+import com.intellij.openapi.util.ThrowableComputable;
+import com.intellij.openapi.application.ReadAction;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.*;
 import com.intellij.psi.search.GlobalSearchScope;
+import com.intellij.util.concurrency.AppExecutorUtil;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.*;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 public class SQLPreviewAction extends AnAction {
+
+    private static final Logger LOG = Logger.getInstance(SQLPreviewAction.class);
+
+    /**
+     * 进程内预览的类名（同一个类加载器里多次预览不会冲突，因为每次预览都是新加载器，这里只是保持可读性）
+     */
+    private static final String FAST_CLASS_NAME = "MybatisFlexSqlPreview";
+
+    /**
+     * 进程内预览超时时间（毫秒），避免用户代码卡死预览流程
+     */
+    private static final long PREVIEW_TIMEOUT_MS = 20_000L;
+
+    /**
+     * 预览专用线程池：和超时等待的线程分开，避免在 IDE 的公共线程池里互相等待
+     */
+    private static final ExecutorService PREVIEW_EXECUTOR = java.util.concurrent.Executors.newFixedThreadPool(2, runnable -> {
+        Thread thread = new Thread(runnable, "SqlPreview-Worker");
+        thread.setDaemon(true);
+        thread.setPriority(Thread.NORM_PRIORITY - 1);
+        return thread;
+    });
 
     private static final List<String> IMPORT_LIST = Arrays.asList("com.mybatisflex.core.FlexGlobalConfig",
             "com.mybatisflex.core.mybatis.FlexConfiguration",
@@ -67,7 +102,32 @@ public class SQLPreviewAction extends AnAction {
             "com.mybatisflex.core.mybatis.Mappers",
             "java.lang.reflect.Field", "com.mybatisflex.spring.service.impl.ServiceImpl");
     private static final String SYSTEM_OUT_PRINTLN_TO_SQL = "\nSystem.out.println({}.toSQL());";
+    /**
+     * 进程内预览用的语句模板：把 SQL 赋值给局部变量，由生成的 preview() 方法返回，
+     * 这样就不需要重定向 System.out，也不会污染 IDE 控制台
+     */
+    private static final String SQL_RESULT_ASSIGN = "\n__preview_sql = String.valueOf({}.toSQL());";
     private static final String CLASS_TEMPLATE = "public class MybatisFlexSqlPreview {\n    public static void main(String[] args) { {}\n}\n}";
+    private static final String FAST_CLASS_TEMPLATE =
+            "public class {} {\n" +
+                    "    public static String preview() {\n" +
+                    "        String __preview_sql = null;\n" +
+                    "        try { {}\n" +
+                    "        } catch (Throwable __preview_error) {\n" +
+                    "            __preview_error.printStackTrace();\n" +
+                    "            return \"" + SqlPreviewRunner.ERROR_MARKER + "\" + __preview_error.getClass().getName()\n" +
+                    "                    + \": \" + __preview_error.getMessage();\n" +
+                    "        }\n" +
+                    "        return __preview_sql;\n" +
+                    "    }\n" +
+                    "\n" +
+                    "    public static void main(String[] args) {\n" +
+                    "        String __preview_sql = preview();\n" +
+                    "        if (__preview_sql != null) {\n" +
+                    "            System.out.println(__preview_sql);\n" +
+                    "        }\n" +
+                    "    }\n" +
+                    "}\n";
 
     private PsiClass entityClass;
     PsiMethod constructorMethod;
@@ -80,21 +140,234 @@ public class SQLPreviewAction extends AnAction {
     private final List<String> excludeImportList = Arrays.asList("org.mapstruct.factory.Mappers");
     AnActionEvent event;
 
-    public void preview(String selectedText, PsiJavaFile psiFile,AnActionEvent actionEvent, SimpleFunction function) {
+    /**
+     * 是否生成"返回 SQL 字符串"的语句（进程内预览），而不是 System.out.println（旧流程）
+     */
+    private boolean returnSqlResult = false;
+
+    /**
+     * 是否允许修改用户源码（旧流程需要给实体补无参构造器）
+     */
+    private boolean mutateSource = true;
+
+    /**
+     * 预览 SQL
+     * <p>
+     * 优先走"内存编译 + 进程内执行"的快速通道，失败时自动回退到旧流程
+     * （生成源文件 -&gt; IDEA 工程编译 -&gt; 独立 JVM 执行），保证功能不退化。
+     */
+    public void preview(String selectedText, PsiJavaFile psiFile, AnActionEvent actionEvent, SimpleFunction function) {
+        this.event = actionEvent;
+        this.list = null;
+        this.entityClass = null;
+        Project project = ProjectUtils.getCurrentProject();
+        selectedText = fixOverload(selectedText, psiFile);
         try {
-            this.event = actionEvent;
-            if (selectedText.startsWith("QueryWrapper")) {
-                selectedText = StrUtil.format(SYSTEM_OUT_PRINTLN_TO_SQL, selectedText);
-            } else {
-                // 处理链式调用
-                selectedText = chain(selectedText, psiFile);
+            FastPreviewRequest request = buildFastPreviewRequest(selectedText, psiFile);
+            if (ObjectUtil.isNotNull(request)) {
+                submitFastPreview(project, psiFile, request, function);
+                return;
             }
-            createFile(psiFile, StrUtil.format(CLASS_TEMPLATE, selectedText), psiFile.getPackageName());
+        } catch (Throwable e) {
+            LOG.debug("build fast sql preview failed, fallback to legacy", e);
+        }
+        legacyPreview(selectedText, psiFile, function);
+    }
+
+    /**
+     * 按项目里真实的 mybatis-flex 方法签名修正重载参数。
+     * <p>
+     * MyBatis-Flex 的同名方法大量重载（{@code isNull(boolean)}、{@code eq(Object, boolean)}、
+     * {@code between(Object, Object, boolean)} 等），预览片段里的 {@code el -> true}
+     * 只有落在函数式接口参数上才成立，落不到时必须改成 {@code true}，否则生成的代码没有对应重载。
+     *
+     * @param text    预览片段
+     * @param psiFile 当前文件
+     * @return 修正后的片段，解析失败时原样返回
+     */
+    private String fixOverload(String text, PsiJavaFile psiFile) {
+        if (StrUtil.isBlank(text) || !text.contains("->")) {
+            return text;
+        }
+        try {
+            Project project = ProjectUtils.getCurrentProject();
+            List<String> classpath = SqlPreviewRunner.resolveClasspath(psiFile);
+            if (classpath.isEmpty()) {
+                return text;
+            }
+            ClassLoader loader = SqlPreviewLoaderCache.getInstance(project).get(classpath);
+            return SqlPreviewChainFixer.fix(text, MybatisFlexMethods.of(loader));
+        } catch (Throwable e) {
+            LOG.debug("fix overload failed: " + e.getMessage());
+            return text;
+        }
+    }
+
+    /**
+     * 构建进程内预览请求（只读 PSI，不改动任何源码）
+     *
+     * @return 无法构建时返回 null，交由旧流程处理
+     */
+    private FastPreviewRequest buildFastPreviewRequest(String selectedText, PsiJavaFile psiFile) {
+        String body = ReadAction.compute((ThrowableComputable<String, RuntimeException>) () -> buildBody(selectedText, psiFile, true));
+        if (StrUtil.isBlank(body)) {
+            return null;
+        }
+        String source = buildFastSource(psiFile, body);
+        String entityClassName = ObjectUtil.isNull(entityClass) ? null : entityClass.getQualifiedName();
+        return new FastPreviewRequest(source, entityClassName, selectedText);
+    }
+
+    /**
+     * 后台线程执行进程内预览，成功则弹窗，失败回退旧流程
+     */
+    private void submitFastPreview(Project project, PsiJavaFile psiFile, FastPreviewRequest request,
+                                   SimpleFunction function) {
+        AppExecutorUtil.getAppExecutorService().submit(() -> {
+            boolean fallback = true;
+            try {
+                String sql = runFastPreview(project, psiFile, request);
+                showResult(project, sql);
+                fallback = false;
+            } catch (SqlPreviewException e) {
+                LOG.debug("fast sql preview failed, fallback to legacy: " + e.getMessage());
+            } catch (Throwable e) {
+                LOG.warn("fast sql preview error", e);
+            } finally {
+                if (fallback) {
+                    ApplicationManager.getApplication().invokeLater(
+                            () -> legacyPreview(request.selectedText, psiFile, function),
+                            ModalityState.defaultModalityState());
+                } else {
+                    function.apply();
+                }
+            }
+        });
+    }
+
+    /**
+     * 带超时地执行预览代码
+     */
+    private String runFastPreview(Project project, PsiJavaFile psiFile, FastPreviewRequest request) {
+        Future<String> future = PREVIEW_EXECUTOR.submit(
+                () -> SqlPreviewRunner.preview(project, psiFile, FAST_CLASS_NAME, request.source, request.entityClassName));
+        try {
+            return future.get(PREVIEW_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+        } catch (java.util.concurrent.TimeoutException e) {
+            future.cancel(true);
+            throw new SqlPreviewException("SQL 预览超时（" + PREVIEW_TIMEOUT_MS + "ms）");
+        } catch (java.util.concurrent.ExecutionException e) {
+            Throwable cause = e.getCause();
+            if (cause instanceof SqlPreviewException) {
+                throw (SqlPreviewException) cause;
+            }
+            throw new SqlPreviewException(cause == null ? e.getMessage() : cause.getMessage(), cause);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new SqlPreviewException("SQL 预览被中断");
+        }
+    }
+
+    private void showResult(Project project, String sql) {
+        if (StrUtil.isBlank(sql)) {
+            NotificationUtils.notifyWarning("未解析到 SQL，请检查预览语句", "SQL Preview", project);
+            return;
+        }
+        ApplicationManager.getApplication().invokeLater(
+                () -> new SQLPreviewDialog(sql, event).setVisible(true),
+                ModalityState.defaultModalityState());
+    }
+
+    /**
+     * 旧流程：生成源文件 -> 工程编译 -> 独立 JVM 执行
+     */
+    private void legacyPreview(String selectedText, PsiJavaFile psiFile, SimpleFunction function) {
+        this.list = null;
+        this.entityClass = null;
+        this.mutateSource = true;
+        this.returnSqlResult = false;
+        try {
+            String body = buildBody(selectedText, psiFile, false);
+            createFile(psiFile, StrUtil.format(CLASS_TEMPLATE, body), psiFile.getPackageName());
         } catch (Exception e) {
-            e.printStackTrace();
+            LOG.warn("legacy sql preview failed", e);
         } finally {
-            // new File("MybatisFlexSqlPreview").delete();
             function.apply();
+        }
+    }
+
+    /**
+     * 组装预览方法体
+     *
+     * @param selectedText   选中的代码片段
+     * @param psiFile        当前文件
+     * @param returnSqlResult true：生成返回 SQL 的语句（进程内预览）；false：生成 System.out.println 语句（旧流程）
+     */
+    private String buildBody(String selectedText, PsiJavaFile psiFile, boolean returnSqlResult) {
+        this.returnSqlResult = returnSqlResult;
+        this.mutateSource = !returnSqlResult;
+        if (selectedText.startsWith("QueryWrapper")) {
+            return StrUtil.format(statementTemplate(), selectedText);
+        }
+        // 处理链式调用
+        return chain(selectedText, psiFile);
+    }
+
+    private String statementTemplate() {
+        return returnSqlResult ? SQL_RESULT_ASSIGN : SYSTEM_OUT_PRINTLN_TO_SQL;
+    }
+
+    /**
+     * 组装进程内预览的完整源码：包名 + 原文件导入 + 预览类
+     */
+    private String buildFastSource(PsiJavaFile psiFile, String body) {
+        StringBuilder builder = new StringBuilder();
+        String packageName = psiFile.getPackageName();
+        if (StrUtil.isNotBlank(packageName)) {
+            builder.append("package ").append(packageName).append(";\n\n");
+        }
+        Set<String> imports = new LinkedHashSet<>();
+        PsiImportList importList = psiFile.getImportList();
+        if (ObjectUtil.isNotNull(importList)) {
+            for (PsiImportStatementBase statement : importList.getAllImportStatements()) {
+                String importText = statement.getText();
+                String qualified = StrUtil.subBetween(importText, "import", ";");
+                if (ObjectUtil.isNull(qualified)) {
+                    continue;
+                }
+                qualified = qualified.trim();
+                if (excludeImportList.contains(qualified) || excludeImportList.contains("import " + qualified)) {
+                    continue;
+                }
+                imports.add(qualified);
+            }
+        }
+        if (CollUtil.isNotEmpty(list)) {
+            imports.addAll(list);
+        }
+        for (String qualified : imports) {
+            builder.append("import ").append(qualified).append(";\n");
+        }
+        builder.append('\n');
+        builder.append(StrUtil.format(FAST_CLASS_TEMPLATE, FAST_CLASS_NAME, body));
+        return builder.toString();
+    }
+
+    /**
+     * 一次进程内预览请求
+     */
+    private static final class FastPreviewRequest {
+        private final String source;
+        private final String entityClassName;
+        /**
+         * 回退时使用：重新走旧流程需要的原始片段
+         */
+        private final String selectedText;
+
+        private FastPreviewRequest(String source, String entityClassName, String selectedText) {
+            this.source = source;
+            this.entityClassName = entityClassName;
+            this.selectedText = selectedText;
         }
     }
 
@@ -162,7 +435,7 @@ public class SQLPreviewAction extends AnAction {
             text = StrUtil.subAfter(text, "this.", false);
         }
         // 处理service里面的链式调用
-        String print = StrUtil.format(SYSTEM_OUT_PRINTLN_TO_SQL, StrUtil.startWithAny(text, "queryChain()", "query()", "updateChain()") ? "service." + text : text);
+        String print = StrUtil.format(statementTemplate(), StrUtil.startWithAny(text, "queryChain()", "query()", "updateChain()") ? "service." + text : text);
         boolean flag = StrUtil.containsAny(text, "queryChain()", "query()", "updateChain()");
         AtomicReference<String> variableReference = new AtomicReference<>();
         String ofValue = null;
@@ -220,27 +493,21 @@ public class SQLPreviewAction extends AnAction {
             // 导入新的
             list.addAll(SERVICE_IMPORT_LIST);
         }
-        // 添加import
-        WriteCommandAction.runWriteCommandAction(ProjectUtils.getCurrentProject(), () -> {
-            if (ObjectUtil.isNotNull(entityClass)) {
-                boolean hashConstructor = isHasConstructor(entityClass);
-                if (!hashConstructor) {
-                    constructorMethod = instance.createMethodFromText(StrUtil.format("public {}(){}", entityClass.getName(), "{}"), null);
-                    entityClass.add(constructorMethod);
+        if (mutateSource) {
+            // 旧流程需要实体存在无参构造器；进程内预览改成字节码补齐，不动用户源码
+            WriteCommandAction.runWriteCommandAction(ProjectUtils.getCurrentProject(), () -> {
+                if (ObjectUtil.isNotNull(entityClass)) {
+                    boolean hashConstructor = isHasConstructor(entityClass);
+                    if (!hashConstructor) {
+                        constructorMethod = instance.createMethodFromText(StrUtil.format("public {}(){}", entityClass.getName(), "{}"), null);
+                        entityClass.add(constructorMethod);
+                    }
                 }
-            }
-        });
+            });
+        }
 
         text = StrUtil.format(COMMON_CODE, ObjectUtil.defaultIfNull(val,
                 "Object"), Template.getConfigData(MybatisFlexConstant.SQL_DIALECT,"mysql")) + text + print;
-
-        // if (StrUtil.isNotBlank(val)) {
-        //     // 添加Mapper
-        //     text = StrUtil.format(COMMON_CODE, val) + text + print;
-        //
-        // } else {
-        //     text += print;
-        // }
 
         return text;
     }

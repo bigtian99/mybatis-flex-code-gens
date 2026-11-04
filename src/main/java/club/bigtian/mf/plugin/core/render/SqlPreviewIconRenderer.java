@@ -15,8 +15,8 @@ import java.util.Map;
 public class SqlPreviewIconRenderer extends GutterIconRenderer {
     private int lineNumber;
     private PsiJavaFile psiFile;
-    // 添加一个标志用于控制按钮的启用状态，防止用户多次点击
-    private static boolean isEnabled = true;
+    // 每个图标各自持有一个标志，防止同一个图标被连续点击多次（原来是 static，点一个图标会把所有图标都禁掉）
+    private volatile boolean previewing = false;
     Map<Integer, String> iconMap;
 
     public SqlPreviewIconRenderer(int lineNumber, PsiJavaFile psiFile, Map<Integer, String> iconMap) {
@@ -35,16 +35,12 @@ public class SqlPreviewIconRenderer extends GutterIconRenderer {
         return new AnAction() {
             @Override
             public void actionPerformed(@NotNull AnActionEvent e) {
-                if (isEnabled) {
-                    // 检查按钮是否启用
-                    isEnabled = false; // 点击后禁用按钮
-                    String selectedText = iconMap.get(lineNumber);
-                    new SQLPreviewAction().preview(selectedText, psiFile, e, () -> {
-                        // 在SQLPreviewAction完成所有逻辑后，再启用按钮
-                        isEnabled = true;
-                    });
-
+                if (previewing) {
+                    return;
                 }
+                previewing = true;
+                String selectedText = iconMap.get(lineNumber);
+                new SQLPreviewAction().preview(selectedText, psiFile, e, () -> previewing = false);
             }
         };
 
