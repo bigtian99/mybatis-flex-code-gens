@@ -61,10 +61,11 @@ public final class SqlPreviewLoaderCache implements Disposable {
      * 获取（或创建）框架类加载器
      *
      * @param classpath 项目运行 classpath
+     * @param salt      额外影响预览结果的配置（例如方言），变化时重建加载器
      */
-    public synchronized SqlPreviewClassLoader get(List<String> classpath) {
+    public synchronized SqlPreviewClassLoader get(List<String> classpath, String salt) {
         installCompilationHook();
-        String current = fingerprint(classpath);
+        String current = fingerprint(classpath, salt);
         if (loader != null && current.equals(fingerprint)) {
             return loader;
         }
@@ -120,9 +121,11 @@ public final class SqlPreviewLoaderCache implements Disposable {
         loader = null;
     }
 
-    private static String fingerprint(List<String> classpath) {
+    private static String fingerprint(List<String> classpath, String salt) {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            digest.update(String.valueOf(salt).getBytes(StandardCharsets.UTF_8));
+            digest.update((byte) 0);
             for (String path : classpath) {
                 digest.update(String.valueOf(path).getBytes(StandardCharsets.UTF_8));
                 digest.update((byte) 0);
@@ -134,7 +137,7 @@ public final class SqlPreviewLoaderCache implements Disposable {
             }
             return builder.toString();
         } catch (Exception e) {
-            return String.valueOf(classpath.hashCode());
+            return String.valueOf(classpath.hashCode()) + "|" + salt;
         }
     }
 }

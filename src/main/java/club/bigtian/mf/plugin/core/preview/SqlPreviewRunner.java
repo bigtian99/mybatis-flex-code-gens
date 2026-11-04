@@ -1,5 +1,7 @@
 package club.bigtian.mf.plugin.core.preview;
 
+import club.bigtian.mf.plugin.core.Template;
+import club.bigtian.mf.plugin.core.constant.MybatisFlexConstant;
 import cn.hutool.core.util.ObjectUtil;
 import cn.hutool.core.util.StrUtil;
 import com.intellij.execution.configurations.JavaParameters;
@@ -58,7 +60,8 @@ public final class SqlPreviewRunner {
         if (mainBytes == null) {
             throw new SqlPreviewException("编译产物中缺少主类 " + className);
         }
-        SqlPreviewClassLoader frameworkLoader = SqlPreviewLoaderCache.getInstance(project).get(classpath);
+        String dialect = Template.getConfigData(MybatisFlexConstant.SQL_DIALECT, "mysql");
+        SqlPreviewClassLoader frameworkLoader = SqlPreviewLoaderCache.getInstance(project).get(classpath, dialect);
         frameworkLoader.patchEntityIfNeeded(entityClass);
         SqlPreviewGeneratedLoader generatedLoader = new SqlPreviewGeneratedLoader(frameworkLoader);
         try {

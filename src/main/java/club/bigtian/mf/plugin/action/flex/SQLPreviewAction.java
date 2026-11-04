@@ -194,7 +194,8 @@ public class SQLPreviewAction extends AnAction {
             if (classpath.isEmpty()) {
                 return text;
             }
-            ClassLoader loader = SqlPreviewLoaderCache.getInstance(project).get(classpath);
+            String dialect = Template.getConfigData(MybatisFlexConstant.SQL_DIALECT, "mysql");
+            ClassLoader loader = SqlPreviewLoaderCache.getInstance(project).get(classpath, dialect);
             return SqlPreviewChainFixer.fix(text, MybatisFlexMethods.of(loader));
         } catch (Throwable e) {
             LOG.debug("fix overload failed: " + e.getMessage());
