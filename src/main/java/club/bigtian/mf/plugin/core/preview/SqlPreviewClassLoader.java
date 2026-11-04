@@ -10,7 +10,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 
 /**
@@ -128,17 +127,5 @@ public final class SqlPreviewClassLoader extends URLClassLoader {
      */
     Class<?> define(String className, byte[] bytes) {
         return defineClass(className, bytes, 0, bytes.length);
-    }
-
-    /**
-     * 编译产物中除主类之外的内部类
-     */
-    void defineAll(Map<String, byte[]> classes, String skipClassName) {
-        for (Map.Entry<String, byte[]> entry : classes.entrySet()) {
-            if (entry.getKey().equals(skipClassName)) {
-                continue;
-            }
-            define(entry.getKey(), entry.getValue());
-        }
     }
 }

@@ -208,16 +208,4 @@ public final class MybatisFlexMethods {
         }
         return false;
     }
-
-    /**
-     * 是否存在可变参数重载
-     */
-    public boolean hasVarargs(String name) {
-        List<Class<?>[]> candidates = overloads.get(name);
-        if (candidates == null) {
-            return false;
-        }
-        return !candidates.isEmpty() && candidates.stream().anyMatch(parameters -> parameters.length > 0
-                && parameters[parameters.length - 1].isArray());
-    }
 }
