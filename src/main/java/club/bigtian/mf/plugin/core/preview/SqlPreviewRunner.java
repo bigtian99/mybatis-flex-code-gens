@@ -50,11 +50,16 @@ public final class SqlPreviewRunner {
     public static String preview(Project project, PsiJavaFile contextFile, String className, String source,
                                  String entityClass) {
         long start = System.currentTimeMillis();
-        List<String> classpath = resolveClasspath(contextFile);
+        Module module = ReadAction.compute(() -> ModuleUtilCore.findModuleForPsiElement(contextFile));
+        if (ObjectUtil.isNull(module)) {
+            throw new SqlPreviewException("无法定位当前文件所属模块");
+        }
+        List<String> classpath = ReadAction.compute(() -> resolveClasspath(module));
         if (classpath.isEmpty()) {
             throw new SqlPreviewException("项目运行 classpath 为空，请检查模块 SDK 与依赖配置");
         }
-        SqlPreviewCompiler.CompiledClasses compiled = SqlPreviewCompiler.compile(className, source, classpath);
+        SqlPreviewCompiler.CompiledClasses compiled =
+                SqlPreviewCompiler.compile(className, source, classpath, resolveJavac(module));
         long compiledAt = System.currentTimeMillis();
         byte[] mainBytes = compiled.getMainBytes();
         if (mainBytes == null) {
@@ -104,6 +109,33 @@ public final class SqlPreviewRunner {
             throw new SqlPreviewException("无法定位当前文件所属模块");
         }
         return resolveClasspath(module);
+    }
+
+    /**
+     * 找到可用的 javac：优先项目 SDK，其次插件运行时自己的 JDK。
+     */
+    private static String resolveJavac(Module module) {
+        String executable = "javac" + (System.getProperty("os.name", "").toLowerCase().contains("win") ? ".exe" : "");
+        try {
+            com.intellij.openapi.projectRoots.Sdk sdk =
+                    com.intellij.openapi.roots.ModuleRootManager.getInstance(module).getSdk();
+            String home = sdk == null ? null : sdk.getHomePath();
+            if (home != null) {
+                java.io.File javac = new java.io.File(new java.io.File(home, "bin"), executable);
+                if (javac.isFile()) {
+                    return javac.getAbsolutePath();
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        String javaHome = System.getProperty("java.home");
+        if (javaHome != null) {
+            java.io.File javac = new java.io.File(new java.io.File(javaHome, "bin"), executable);
+            if (javac.isFile()) {
+                return javac.getAbsolutePath();
+            }
+        }
+        return null;
     }
 
     /**

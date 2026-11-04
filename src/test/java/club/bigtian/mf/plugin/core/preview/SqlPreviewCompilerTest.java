@@ -18,6 +18,17 @@ public class SqlPreviewCompilerTest {
 
     private static final String CLASS_NAME = "preview.TestPreview";
 
+    /**
+     * 测试里显式给出 javac：IntelliJ 的测试沙箱里 ToolProvider 拿不到编译器，需要外部 javac 兜底
+     */
+    private static final String JAVAC = javacPath();
+
+    private static String javacPath() {
+        String executable = "javac" + (System.getProperty("os.name", "").toLowerCase().contains("win") ? ".exe" : "");
+        java.io.File javac = new java.io.File(new java.io.File(System.getProperty("java.home"), "bin"), executable);
+        return javac.isFile() ? javac.getAbsolutePath() : null;
+    }
+
     @Test
     public void shouldCompileInMemoryWithoutWritingFiles() {
         String source = "package preview;\n"
@@ -25,7 +36,7 @@ public class SqlPreviewCompilerTest {
                 + "    public static String preview() { return \"SELECT 1\"; }\n"
                 + "}\n";
         SqlPreviewCompiler.CompiledClasses compiled =
-                SqlPreviewCompiler.compile(CLASS_NAME, source, Collections.emptyList());
+                SqlPreviewCompiler.compile(CLASS_NAME, source, Collections.emptyList(), JAVAC);
         assertNotNull(compiled.getMainBytes());
         assertTrue(compiled.getMainBytes().length > 0);
     }
@@ -37,9 +48,9 @@ public class SqlPreviewCompilerTest {
                 + "    public static String preview() { return \"cached\"; }\n"
                 + "}\n";
         SqlPreviewCompiler.CompiledClasses first =
-                SqlPreviewCompiler.compile(CLASS_NAME, source, Collections.emptyList());
+                SqlPreviewCompiler.compile(CLASS_NAME, source, Collections.emptyList(), JAVAC);
         SqlPreviewCompiler.CompiledClasses second =
-                SqlPreviewCompiler.compile(CLASS_NAME, source, Collections.emptyList());
+                SqlPreviewCompiler.compile(CLASS_NAME, source, Collections.emptyList(), JAVAC);
         assertSame("同一份源码应当命中字节码缓存", first, second);
     }
 
@@ -50,7 +61,7 @@ public class SqlPreviewCompilerTest {
                 + "    public static String preview() { return undefinedSymbol; }\n"
                 + "}\n";
         try {
-            SqlPreviewCompiler.compile(CLASS_NAME, source, Collections.emptyList());
+            SqlPreviewCompiler.compile(CLASS_NAME, source, Collections.emptyList(), JAVAC);
             fail("编译失败时应当抛出 SqlPreviewException");
         } catch (SqlPreviewException e) {
             assertTrue(e.getMessage().contains("编译失败"));
@@ -65,7 +76,7 @@ public class SqlPreviewCompilerTest {
                 + "    public TestPreview(int value) { this.value = value; }\n"
                 + "}\n";
         SqlPreviewCompiler.CompiledClasses compiled =
-                SqlPreviewCompiler.compile(CLASS_NAME, source, Collections.emptyList());
+                SqlPreviewCompiler.compile(CLASS_NAME, source, Collections.emptyList(), JAVAC);
         byte[] original = compiled.getMainBytes();
         byte[] patched = EntityConstructorPatcher.ensureNoArgConstructor(original);
         assertTrue("缺少无参构造器时应当补齐", patched != original);
