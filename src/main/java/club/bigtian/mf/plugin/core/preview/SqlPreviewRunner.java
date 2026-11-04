@@ -80,7 +80,7 @@ public final class SqlPreviewRunner {
         } catch (InvocationTargetException e) {
             Throwable target = e.getTargetException();
             throw new SqlPreviewException("预览代码执行失败：" + describe(target), target);
-        } catch (ClassNotFoundException | NoClassDefFoundError e) {
+        } catch (LinkageError e) {
             throw new SqlPreviewException("项目依赖未编译或缺少类：" + e.getMessage(), e);
         } catch (Exception e) {
             throw new SqlPreviewException("预览代码执行失败：" + describe(e), e);
