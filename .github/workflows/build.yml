@@ -34,8 +34,14 @@ jobs:
           java-version: "21"
 
       # 缓存 1：~/.gradle/caches（含 IntelliJ Platform 安装包 zip，1GB+）
+      # 显式指定 gradle-version：仓库的 gradle-wrapper.properties 指向腾讯云镜像
+      # （distributionUrl=https://mirrors.cloud.tencent.com/gradle/...），
+      # GitHub runner 上拉这个包会 read timeout，直接把整条流水线干掉。
+      # 本地开发依旧用 ./gradlew + 镜像，CI 里用 setup-gradle 装官方发行版。
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.10.2"
 
       # 缓存 key 必须在 checkout 之后算：job 级 env 里的 hashFiles() 会在 checkout 前求值，永远为空
       - name: Compute platform cache key
@@ -63,10 +69,10 @@ jobs:
           du -sh "$PLATFORM_CACHE_DIR" 2>/dev/null || echo "platform dir not populated yet"
 
       - name: Test
-        run: bash ./gradlew test --no-daemon
+        run: gradle test --no-daemon
 
       - name: Build plugin
-        run: bash ./gradlew buildPlugin --no-daemon
+        run: gradle buildPlugin --no-daemon
 
       - name: Save IntelliJ Platform
         if: success() && steps.platform-cache.outputs.cache-hit != 'true'
