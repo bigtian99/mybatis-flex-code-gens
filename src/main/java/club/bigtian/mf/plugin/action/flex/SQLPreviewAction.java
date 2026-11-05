@@ -233,7 +233,7 @@ public class SQLPreviewAction extends AnAction {
             }
             long cost = System.currentTimeMillis() - start;
             LOG.info("[SQLPreview] fast path ok in " + cost + "ms");
-            showResult(project, sql, "fast " + cost + "ms");
+            showResult(project, sql, "⚡ fast " + cost + "ms");
             function.apply();
         } catch (Throwable e) {
             LOG.warn("[SQLPreview] preview failed", e);
@@ -291,7 +291,7 @@ public class SQLPreviewAction extends AnAction {
             if (classpath.isEmpty()) {
                 return text;
             }
-            String dialect = Template.getConfigData(MybatisFlexConstant.SQL_DIALECT, "mysql");
+            String dialect = dialectDbType();
             ClassLoader loader = SqlPreviewLoaderCache.getInstance(project).get(classpath, dialect);
             return SqlPreviewChainFixer.fix(text, MybatisFlexMethods.of(loader));
         } catch (Throwable e) {
@@ -622,9 +622,27 @@ public class SQLPreviewAction extends AnAction {
         }
 
         text = StrUtil.format(COMMON_CODE, ObjectUtil.defaultIfNull(val,
-                "Object"), Template.getConfigData(MybatisFlexConstant.SQL_DIALECT,"mysql")) + text + print;
+                "Object"), dialectDbType()) + text + print;
 
         return text;
+    }
+
+    /**
+     * 生成代码里用的是 {@code DbType.XXX} 枚举常量，必须大写（MYSQL / ORACLE ...）。
+     * 配置里若为空或是小写（历史默认值 "mysql"），直接拼进去会变成 {@code DbType.mysql}
+     * 这种不存在的枚举，编译报 cannot find symbol: variable mysql。
+     */
+    private static String dialectDbType() {
+        String value = null;
+        try {
+            value = Template.getConfigData(MybatisFlexConstant.SQL_DIALECT, "MYSQL");
+        } catch (Throwable ignored) {
+        }
+        if (StrUtil.isBlank(value)) {
+            return "MYSQL";
+        }
+        String normalized = value.trim().toUpperCase(java.util.Locale.ROOT).replace('-', '_').replace(' ', '_');
+        return StrUtil.isBlank(normalized) ? "MYSQL" : normalized;
     }
 
     /**
