@@ -98,6 +98,15 @@ public final class SqlPreviewChainFixer {
             return parts;
         }
         List<String> result = new ArrayList<>(parts);
+        // UpdateChain/UpdateWrapper 的 set(列, 值)：预览时值只是占位符（"?"），
+        // 遇到 Date 等有类型处理器的列会在 toSQL() 里做类型转换，抛 ClassCastException。
+        // 换成 null 就不会走 TypeHandler，SQL 依然能正常生成。
+        if ("set".equals(methodName) && result.size() >= 2) {
+            String value = result.get(1).trim();
+            if ("\"?\"".equals(value) || "'?'".equals(value) || "?".equals(value)) {
+                result.set(1, "null");
+            }
+        }
         for (int i = result.size() - 1; i >= 0; i--) {
             String trimmed = result.get(i).trim();
             Matcher matcher = FLAG_LAMBDA.matcher(trimmed);

@@ -93,6 +93,18 @@ public class SqlPreviewChainFixerTest {
     }
 
     @Test
+    public void shouldReplacePlaceholderSetValueWithNull() {
+        MybatisFlexMethods methods = methods();
+        assertEquals(".set(IMAGE_USER.LAST_REQUEST_TIME, null)",
+                SqlPreviewChainFixer.fix(".set(IMAGE_USER.LAST_REQUEST_TIME, \"?\")", methods));
+        assertEquals("UpdateChain.of(m).set(A, null).set(B, null)",
+                SqlPreviewChainFixer.fix("UpdateChain.of(m).set(A, \"?\").set(B, '?')", methods));
+        // 真实值不要动
+        assertEquals(".set(A, 1)", SqlPreviewChainFixer.fix(".set(A, 1)", methods));
+        assertEquals(".set(A, now)", SqlPreviewChainFixer.fix(".set(A, now)", methods));
+    }
+
+    @Test
     public void splitArgumentsShouldRespectNesting() {
         assertEquals(Arrays.asList("a", "\"b,c\"", "d(e, f)"),
                 SqlPreviewChainFixer.splitArguments("a, \"b,c\", d(e, f)"));

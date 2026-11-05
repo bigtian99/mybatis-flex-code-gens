@@ -282,7 +282,7 @@ public class SQLPreviewAction extends AnAction {
      * 按项目里真实的 mybatis-flex 方法签名修正重载参数（在后台线程调用）。
      */
     private String fixOverload(String text, PsiJavaFile psiFile) {
-        if (StrUtil.isBlank(text) || !text.contains("->")) {
+        if (StrUtil.isBlank(text) || (!text.contains("->") && !text.contains(".set("))) {
             return text;
         }
         try {
