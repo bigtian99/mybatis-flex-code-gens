@@ -486,7 +486,10 @@ public class SQLPreviewAction extends AnAction {
             }
             if (CollUtil.isNotEmpty(list)) {
                 for (String impor : list) {
-                    psiJavaFileImportList.add(instance.createImportStatement(PsiJavaFileUtil.getPsiClass(impor)));
+                    PsiClass importClass = PsiJavaFileUtil.getPsiClass(impor);
+                    if (importClass != null) {
+                        psiJavaFileImportList.add(instance.createImportStatement(importClass));
+                    }
                 }
             }
             try {
@@ -686,6 +689,11 @@ public class SQLPreviewAction extends AnAction {
                     }
                     String className = StrUtil.subBefore(text, " ", true);
                     String qualifiedName = qualifiedNameImportMap.get(className);
+                    if (StrUtil.isBlank(qualifiedName)) {
+                        // 片段里引用的类没有 import 映射（比如手写变量、同包类），跳过，不能拿 null 去查 PSI
+                        LOG.debug("[SQLPreview] no import mapping for " + className + ", skip");
+                        continue;
+                    }
                     // 获取全局搜索范围
                     Collection<PsiClass> implementors = PsiJavaFileUtil.getSonPsiClass(qualifiedName, GlobalSearchScope.allScope(project));
                     if (CollUtil.isEmpty(implementors)) {
