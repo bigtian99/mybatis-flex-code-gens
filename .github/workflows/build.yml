@@ -5,15 +5,29 @@ on:
     branches:
       - master
       - "2026.*"
+    tags:
+      - "v*"
   pull_request:
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "发布用的 tag（留空则只构建，不建 Release）"
+        required: false
+        default: ""
 
 permissions:
-  contents: read
+  contents: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      # IntelliJ Platform Gradle Plugin 把解压后的平台放在项目下 .intellijPlatform
+      PLATFORM_CACHE_DIR: .intellijPlatform
     steps:
       - uses: actions/checkout@v4
 
@@ -23,11 +37,53 @@ jobs:
           distribution: temurin
           java-version: "21"
 
+      # 缓存 1：~/.gradle/caches（含 IntelliJ Platform 安装包 ideaIU-*.zip，1GB+）
+      # 重要：GitHub Actions 的缓存按 ref 隔离，只能恢复「同一个分支」或「默认分支」保存的缓存。
+      # 所以请始终在固定分支（如 preview/pkg）上 workflow_dispatch 构建，不要每次新建 tag，
+      # 否则每次都是 cache miss，都要重新下平台包。
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.10.2"
+          cache-read-only: false
+
+      - name: Compute platform cache key
+        id: platform-key
+        run: |
+          # 只把「影响平台下载」的字段算进 key：platformVersion 等。
+          # 不能把整个 gradle.properties 哈希进去——里面还有 pluginVersion，
+          # 每发一版就变，key 一变平台缓存就永远 miss。
+          digest=$({ grep -E '^(platformType|platformVersion|platformBundledPlugins|pluginSinceBuild|pluginUntilBuild)[[:space:]]*=' gradle.properties || true; \
+                      cat gradle/libs.versions.toml gradle/wrapper/gradle-wrapper.properties; } | sha256sum | cut -c1-16)
+          echo "key=idea-${RUNNER_OS}-${digest}" >> "$GITHUB_OUTPUT"
+          echo "platform cache key: idea-${RUNNER_OS}-${digest}"
+
+      - name: Restore IntelliJ Platform
+        id: platform-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.PLATFORM_CACHE_DIR }}
+          key: ${{ steps.platform-key.outputs.key }}
+          restore-keys: |
+            idea-${{ runner.os }}-
+
+      - name: Cache status
+        run: |
+          echo "cache hit: ${{ steps.platform-cache.outputs.cache-hit }}"
+          du -sh "$PLATFORM_CACHE_DIR" 2>/dev/null || echo "platform dir not populated yet"
+
+      - name: Test
+        run: gradle test --no-daemon
 
       - name: Build plugin
-        run: bash ./gradlew buildPlugin --no-daemon
+        run: gradle buildPlugin --no-daemon
+
+      - name: Save IntelliJ Platform
+        if: success() && steps.platform-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.PLATFORM_CACHE_DIR }}
+          key: ${{ steps.platform-key.outputs.key }}
 
       - name: Upload plugin distribution
         uses: actions/upload-artifact@v4
@@ -35,3 +91,17 @@ jobs:
           name: plugin-distribution
           path: build/distributions/*.zip
           if-no-files-found: error
+
+      # 打 tag 或手动指定 release_tag 时，把 zip 挂到 GitHub Release
+      - name: Attach zip to release
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="${{ inputs.release_tag }}"
+          if [ -z "$tag" ]; then tag="$GITHUB_REF_NAME"; fi
+          ls -lh build/distributions
+          gh release view "$tag" >/dev/null 2>&1 \
+            && gh release upload "$tag" build/distributions/*.zip --clobber \
+            || gh release create "$tag" build/distributions/*.zip \
+                 --title "$tag" --generate-notes --target "$GITHUB_SHA"
