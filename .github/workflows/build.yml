@@ -50,8 +50,11 @@ jobs:
       - name: Compute platform cache key
         id: platform-key
         run: |
-          digest=$(cat gradle.properties gradle/libs.versions.toml gradle/wrapper/gradle-wrapper.properties \
-            | sha256sum | cut -c1-16)
+          # 只把「影响平台下载」的字段算进 key：platformVersion 等。
+          # 不能把整个 gradle.properties 哈希进去——里面还有 pluginVersion，
+          # 每发一版就变，key 一变平台缓存就永远 miss。
+          digest=$({ grep -E '^(platformType|platformVersion|platformBundledPlugins|pluginSinceBuild|pluginUntilBuild)[[:space:]]*=' gradle.properties || true; \
+                      cat gradle/libs.versions.toml gradle/wrapper/gradle-wrapper.properties; } | sha256sum | cut -c1-16)
           echo "key=idea-${RUNNER_OS}-${digest}" >> "$GITHUB_OUTPUT"
           echo "platform cache key: idea-${RUNNER_OS}-${digest}"
 
