@@ -216,7 +216,7 @@ public class SQLPreviewAction extends AnAction {
             FastPreviewRequest request = origin;
             String fixedSource = fixOverload(origin.source, psiFile);
             if (!fixedSource.equals(origin.source)) {
-                request = new FastPreviewRequest(fixedSource, origin.entityClassName, origin.selectedText);
+                request = new FastPreviewRequest(fixedSource, origin.entityClassName, origin.selectedText, origin.className);
             }
             String sql;
             long start = System.currentTimeMillis();
@@ -311,7 +311,9 @@ public class SQLPreviewAction extends AnAction {
         }
         String source = buildFastSource(psiFile, body);
         String entityClassName = ObjectUtil.isNull(entityClass) ? null : entityClass.getQualifiedName();
-        return new FastPreviewRequest(source, entityClassName, selectedText);
+        String packageName = psiFile.getPackageName();
+        String className = StrUtil.isBlank(packageName) ? FAST_CLASS_NAME : packageName + "." + FAST_CLASS_NAME;
+        return new FastPreviewRequest(source, entityClassName, selectedText, className);
     }
 
     private void notifyError(String message, Project project) {
@@ -335,7 +337,7 @@ public class SQLPreviewAction extends AnAction {
      */
     private String runFastPreview(Project project, PsiJavaFile psiFile, FastPreviewRequest request) {
         Future<String> future = PREVIEW_EXECUTOR.submit(
-                () -> SqlPreviewRunner.preview(project, psiFile, FAST_CLASS_NAME, request.source, request.entityClassName));
+                () -> SqlPreviewRunner.preview(project, psiFile, request.className, request.source, request.entityClassName));
         try {
             return future.get(PREVIEW_TIMEOUT_MS, TimeUnit.MILLISECONDS);
         } catch (java.util.concurrent.TimeoutException e) {
@@ -454,11 +456,17 @@ public class SQLPreviewAction extends AnAction {
         private final String source;
         private final String entityClassName;
         /**
+         * 生成类的全限定名（含 package），必须和源码里的 package 一致，否则编译产物按 FQN 存放，
+         * 用简单类名去取会取不到，报"编译产物中缺少主类"。
+         */
+        private final String className;
+        /**
          * 回退时使用：重新走旧流程需要的原始片段
          */
         private final String selectedText;
 
-        private FastPreviewRequest(String source, String entityClassName, String selectedText) {
+        private FastPreviewRequest(String source, String entityClassName, String selectedText, String className) {
+            this.className = className;
             this.source = source;
             this.entityClassName = entityClassName;
             this.selectedText = selectedText;
