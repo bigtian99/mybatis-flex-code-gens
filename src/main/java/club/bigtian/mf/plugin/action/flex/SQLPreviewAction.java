@@ -224,6 +224,7 @@ public class SQLPreviewAction extends AnAction {
                 sql = runFastPreview(project, psiFile, request);
             } catch (Throwable e) {
                 LOG.warn("[SQLPreview] fast path failed, fallback", e);
+                LOG.warn("[SQLPreview] generated source was:\n" + request.source);
                 notifyFallbackOnce(project, describeThrowable(e));
                 handedToLegacy = true;
                 ApplicationManager.getApplication().invokeLater(
