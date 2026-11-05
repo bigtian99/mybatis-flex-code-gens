@@ -25,7 +25,13 @@ kotlin {
 repositories {
     // Keep a stable public mirror for environments that rewrite Maven Central
     // to partial Aliyun repos during IDE sync/import.
-    maven("https://maven.aliyun.com/repository/public")
+    //
+    // CI 上不加这个镜像：GitHub runner 访问 maven.aliyun.com 时常返回 502，
+    // 而 Gradle 遇到 5xx 会直接失败、不会继续尝试后面的仓库，
+    // 结果就是解析 bundledModule:com.intellij.database:* 时整条流水线挂掉。
+    if (System.getenv("CI") == null) {
+        maven("https://maven.aliyun.com/repository/public")
+    }
     mavenCentral()
 
     // IntelliJ Platform Gradle Plugin Repositories Extension - read more: https://plugins.jetbrains.com/docs/intellij/tools-intellij-platform-gradle-plugin-repositories-extension.html
