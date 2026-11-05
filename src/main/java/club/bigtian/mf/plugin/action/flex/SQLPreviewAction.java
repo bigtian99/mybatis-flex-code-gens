@@ -169,30 +169,54 @@ public class SQLPreviewAction extends AnAction {
             function.apply();
             return;
         }
-        // 关键：点击回调本身在 EDT 上。classpath 解析、jar 扫描、编译都可能很慢，
-        // 绝对不能在 EDT 上做，否则界面卡死表现为"点了没反应"。
+        // 关键点一：PSI 只能在 read action 里访问，而且要在 EDT 上先把 PSI 榨干成字符串；
+        // 后台线程只碰纯字符串，避免 "Read access is allowed from inside read-action only"。
+        FastPreviewRequest request;
         try {
-            AppExecutorUtil.getAppExecutorService().submit(() -> doPreview(project, psiFile, selectedText, function));
+            request = ReadAction.compute((ThrowableComputable<FastPreviewRequest, RuntimeException>)
+                    () -> buildFastPreviewRequest(selectedText, psiFile));
+        } catch (Throwable e) {
+            LOG.warn("[SQLPreview] build preview request failed, use legacy", e);
+            notifyError("SQL 预览失败：" + describeThrowable(e), project);
+            try {
+                legacyPreview(selectedText, psiFile, function);
+            } finally {
+                function.apply();
+            }
+            return;
+        }
+        if (request == null) {
+            try {
+                legacyPreview(selectedText, psiFile, function);
+            } finally {
+                function.apply();
+            }
+            return;
+        }
+        // 关键点二：解析 classpath、扫 jar、编译、执行都可能很慢，全部离开 EDT。
+        try {
+            AppExecutorUtil.getAppExecutorService().submit(() -> doPreview(project, psiFile, request, function));
         } catch (Throwable e) {
             LOG.warn("[SQLPreview] submit task failed", e);
             notifyError("SQL 预览失败：" + describeThrowable(e), project);
-            function.apply();
+            try {
+                legacyPreview(request.selectedText, psiFile, function);
+            } finally {
+                function.apply();
+            }
         }
     }
 
     /**
-     * 真正的预览流程，全部在后台线程执行；任何异常都必须让用户看见，且一定复位点击标志。
+     * 后台执行：只用字符串，不碰 PSI。任何异常都要让用户看见。
      */
-    private void doPreview(Project project, PsiJavaFile psiFile, String originalText, SimpleFunction function) {
+    private void doPreview(Project project, PsiJavaFile psiFile, FastPreviewRequest origin, SimpleFunction function) {
         boolean handedToLegacy = false;
         try {
-            String fixedText = fixOverload(originalText, psiFile);
-            FastPreviewRequest request = buildFastPreviewRequest(fixedText, psiFile);
-            if (request == null) {
-                handedToLegacy = true;
-                ApplicationManager.getApplication().invokeLater(
-                        () -> legacyPreview(fixedText, psiFile, function), ModalityState.defaultModalityState());
-                return;
+            FastPreviewRequest request = origin;
+            String fixedSource = fixOverload(origin.source, psiFile);
+            if (!fixedSource.equals(origin.source)) {
+                request = new FastPreviewRequest(fixedSource, origin.entityClassName, origin.selectedText);
             }
             String sql;
             long start = System.currentTimeMillis();
@@ -203,13 +227,13 @@ public class SQLPreviewAction extends AnAction {
                 notifyFallbackOnce(project, describeThrowable(e));
                 handedToLegacy = true;
                 ApplicationManager.getApplication().invokeLater(
-                        () -> legacyPreview(request.selectedText, psiFile, function),
+                        () -> legacyPreview(origin.selectedText, psiFile, function),
                         ModalityState.defaultModalityState());
                 return;
             }
             long cost = System.currentTimeMillis() - start;
             LOG.info("[SQLPreview] fast path ok in " + cost + "ms");
-            showResult(project, sql, "fast " + cost + "ms", function);
+            showResult(project, sql, "fast " + cost + "ms");
             function.apply();
         } catch (Throwable e) {
             LOG.warn("[SQLPreview] preview failed", e);
@@ -217,14 +241,14 @@ public class SQLPreviewAction extends AnAction {
             if (!handedToLegacy) {
                 try {
                     ApplicationManager.getApplication().invokeLater(
-                            () -> legacyPreview(originalText, psiFile, function), ModalityState.defaultModalityState());
+                            () -> legacyPreview(origin.selectedText, psiFile, function),
+                            ModalityState.defaultModalityState());
                     handedToLegacy = true;
                 } catch (Throwable ignored) {
                 }
             }
             function.apply();
         } finally {
-            // 兜底：无论走哪条路都要把点击标志复位，避免"第一次失败后永远点不动"
             if (handedToLegacy) {
                 LOG.info("[SQLPreview] handed to legacy path");
             }
@@ -280,8 +304,8 @@ public class SQLPreviewAction extends AnAction {
      * 构建进程内预览请求（只读 PSI，不改动任何源码）
      */
     private FastPreviewRequest buildFastPreviewRequest(String selectedText, PsiJavaFile psiFile) {
-        String body = ReadAction.compute((ThrowableComputable<String, RuntimeException>)
-                () -> buildBody(selectedText, psiFile, true));
+        // 调用方已包在 ReadAction 里
+        String body = buildBody(selectedText, psiFile, true);
         if (StrUtil.isBlank(body)) {
             return null;
         }
@@ -329,10 +353,9 @@ public class SQLPreviewAction extends AnAction {
         }
     }
 
-    private void showResult(Project project, String sql, String meta, SimpleFunction function) {
+    private void showResult(Project project, String sql, String meta) {
         if (StrUtil.isBlank(sql)) {
             notifyError("未解析到 SQL，请检查预览语句（生成代码见 idea.log）", project);
-            function.apply();
             return;
         }
         ApplicationManager.getApplication().invokeLater(() -> {

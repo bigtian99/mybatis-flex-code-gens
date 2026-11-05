@@ -115,6 +115,10 @@ public final class SqlPreviewRunner {
      * 找到可用的 javac：优先项目 SDK，其次插件运行时自己的 JDK。
      */
     private static String resolveJavac(Module module) {
+        return ReadAction.compute(() -> resolveJavacInReadAction(module));
+    }
+
+    private static String resolveJavacInReadAction(Module module) {
         String executable = "javac" + (System.getProperty("os.name", "").toLowerCase().contains("win") ? ".exe" : "");
         try {
             com.intellij.openapi.projectRoots.Sdk sdk =
@@ -142,6 +146,11 @@ public final class SqlPreviewRunner {
      * 解析模块的运行 classpath（模块输出目录 + 依赖库 + SDK）
      */
     private static List<String> resolveClasspath(Module module) {
+        // 访问模块模型/依赖根需要在 read action 里
+        return ReadAction.compute(() -> resolveClasspathInReadAction(module));
+    }
+
+    private static List<String> resolveClasspathInReadAction(Module module) {
         try {
             JavaParameters parameters = new JavaParameters();
             parameters.configureByModule(module, JavaParameters.JDK_AND_CLASSES_AND_TESTS);
