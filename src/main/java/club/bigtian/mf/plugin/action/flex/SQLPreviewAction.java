@@ -163,29 +163,99 @@ public class SQLPreviewAction extends AnAction {
         this.list = null;
         this.entityClass = null;
         Project project = ProjectUtils.getCurrentProject();
-        selectedText = fixOverload(selectedText, psiFile);
-        try {
-            FastPreviewRequest request = buildFastPreviewRequest(selectedText, psiFile);
-            if (ObjectUtil.isNotNull(request)) {
-                submitFastPreview(project, psiFile, request, function);
-                return;
-            }
-        } catch (Throwable e) {
-            LOG.debug("build fast sql preview failed, fallback to legacy", e);
+        LOG.info("[SQLPreview] click, snippet=" + abbreviate(selectedText));
+        if (ObjectUtil.isNull(project) || ObjectUtil.isNull(psiFile)) {
+            notifyError("SQL 预览失败：拿不到当前项目/文件", project);
+            function.apply();
+            return;
         }
-        legacyPreview(selectedText, psiFile, function);
+        // 关键：点击回调本身在 EDT 上。classpath 解析、jar 扫描、编译都可能很慢，
+        // 绝对不能在 EDT 上做，否则界面卡死表现为"点了没反应"。
+        try {
+            AppExecutorUtil.getAppExecutorService().submit(() -> doPreview(project, psiFile, selectedText, function));
+        } catch (Throwable e) {
+            LOG.warn("[SQLPreview] submit task failed", e);
+            notifyError("SQL 预览失败：" + describeThrowable(e), project);
+            function.apply();
+        }
     }
 
     /**
-     * 按项目里真实的 mybatis-flex 方法签名修正重载参数。
-     * <p>
-     * MyBatis-Flex 的同名方法大量重载（{@code isNull(boolean)}、{@code eq(Object, boolean)}、
-     * {@code between(Object, Object, boolean)} 等），预览片段里的 {@code el -> true}
-     * 只有落在函数式接口参数上才成立，落不到时必须改成 {@code true}，否则生成的代码没有对应重载。
-     *
-     * @param text    预览片段
-     * @param psiFile 当前文件
-     * @return 修正后的片段，解析失败时原样返回
+     * 真正的预览流程，全部在后台线程执行；任何异常都必须让用户看见，且一定复位点击标志。
+     */
+    private void doPreview(Project project, PsiJavaFile psiFile, String originalText, SimpleFunction function) {
+        boolean handedToLegacy = false;
+        try {
+            String fixedText = fixOverload(originalText, psiFile);
+            FastPreviewRequest request = buildFastPreviewRequest(fixedText, psiFile);
+            if (request == null) {
+                handedToLegacy = true;
+                ApplicationManager.getApplication().invokeLater(
+                        () -> legacyPreview(fixedText, psiFile, function), ModalityState.defaultModalityState());
+                return;
+            }
+            String sql;
+            long start = System.currentTimeMillis();
+            try {
+                sql = runFastPreview(project, psiFile, request);
+            } catch (Throwable e) {
+                LOG.warn("[SQLPreview] fast path failed, fallback", e);
+                notifyFallbackOnce(project, describeThrowable(e));
+                handedToLegacy = true;
+                ApplicationManager.getApplication().invokeLater(
+                        () -> legacyPreview(request.selectedText, psiFile, function),
+                        ModalityState.defaultModalityState());
+                return;
+            }
+            long cost = System.currentTimeMillis() - start;
+            LOG.info("[SQLPreview] fast path ok in " + cost + "ms");
+            showResult(project, sql, "fast " + cost + "ms", function);
+            function.apply();
+        } catch (Throwable e) {
+            LOG.warn("[SQLPreview] preview failed", e);
+            notifyError("SQL 预览失败：" + describeThrowable(e), project);
+            if (!handedToLegacy) {
+                try {
+                    ApplicationManager.getApplication().invokeLater(
+                            () -> legacyPreview(originalText, psiFile, function), ModalityState.defaultModalityState());
+                    handedToLegacy = true;
+                } catch (Throwable ignored) {
+                }
+            }
+            function.apply();
+        } finally {
+            // 兜底：无论走哪条路都要把点击标志复位，避免"第一次失败后永远点不动"
+            if (handedToLegacy) {
+                LOG.info("[SQLPreview] handed to legacy path");
+            }
+        }
+    }
+
+    private static String describeThrowable(Throwable e) {
+        if (e == null) {
+            return "未知错误";
+        }
+        Throwable root = e;
+        int guard = 0;
+        while (root.getCause() != null && root.getCause() != root && guard++ < 5) {
+            root = root.getCause();
+        }
+        String message = root.getMessage();
+        return root.getClass().getSimpleName() + (StrUtil.isBlank(message) ? "" : ": " + message);
+    }
+
+    private static String abbreviate(String text) {
+        if (text == null) {
+            return "null";
+        }
+        return text.length() <= 200 ? text : text.substring(0, 200) + "...";
+    }
+
+    /**
+     * 快速通道失败时提示一次，避免用户完全无感地一直在走旧流程
+     */
+    /**
+     * 按项目里真实的 mybatis-flex 方法签名修正重载参数（在后台线程调用）。
      */
     private String fixOverload(String text, PsiJavaFile psiFile) {
         if (StrUtil.isBlank(text) || !text.contains("->")) {
@@ -201,18 +271,17 @@ public class SQLPreviewAction extends AnAction {
             ClassLoader loader = SqlPreviewLoaderCache.getInstance(project).get(classpath, dialect);
             return SqlPreviewChainFixer.fix(text, MybatisFlexMethods.of(loader));
         } catch (Throwable e) {
-            LOG.debug("fix overload failed: " + e.getMessage());
+            LOG.debug("[SQLPreview] fix overload failed: " + e.getMessage());
             return text;
         }
     }
 
     /**
      * 构建进程内预览请求（只读 PSI，不改动任何源码）
-     *
-     * @return 无法构建时返回 null，交由旧流程处理
      */
     private FastPreviewRequest buildFastPreviewRequest(String selectedText, PsiJavaFile psiFile) {
-        String body = ReadAction.compute((ThrowableComputable<String, RuntimeException>) () -> buildBody(selectedText, psiFile, true));
+        String body = ReadAction.compute((ThrowableComputable<String, RuntimeException>)
+                () -> buildBody(selectedText, psiFile, true));
         if (StrUtil.isBlank(body)) {
             return null;
         }
@@ -221,39 +290,14 @@ public class SQLPreviewAction extends AnAction {
         return new FastPreviewRequest(source, entityClassName, selectedText);
     }
 
-    /**
-     * 后台线程执行进程内预览，成功则弹窗，失败回退旧流程
-     */
-    private void submitFastPreview(Project project, PsiJavaFile psiFile, FastPreviewRequest request,
-                                   SimpleFunction function) {
-        AppExecutorUtil.getAppExecutorService().submit(() -> {
-            boolean fallback = true;
-            try {
-                long start = System.currentTimeMillis();
-                String sql = runFastPreview(project, psiFile, request);
-                showResult(project, sql, "fast " + (System.currentTimeMillis() - start) + "ms");
-                fallback = false;
-            } catch (SqlPreviewException e) {
-                LOG.warn("fast sql preview failed, fallback to legacy: " + e.getMessage());
-                notifyFallbackOnce(project, e.getMessage());
-            } catch (Throwable e) {
-                LOG.warn("fast sql preview error, fallback to legacy", e);
-                notifyFallbackOnce(project, e.getClass().getSimpleName() + ": " + e.getMessage());
-            } finally {
-                if (fallback) {
-                    ApplicationManager.getApplication().invokeLater(
-                            () -> legacyPreview(request.selectedText, psiFile, function),
-                            ModalityState.defaultModalityState());
-                } else {
-                    function.apply();
-                }
-            }
-        });
+    private void notifyError(String message, Project project) {
+        try {
+            NotificationUtils.notifyError(message, "SQL Preview", project);
+        } catch (Throwable ignored) {
+        }
+        LOG.warn("[SQLPreview] " + message);
     }
 
-    /**
-     * 快速通道失败时提示一次，避免用户完全无感地一直在走旧流程
-     */
     private void notifyFallbackOnce(Project project, String reason) {
         if (!FALLBACK_NOTIFIED.compareAndSet(false, true)) {
             return;
@@ -285,14 +329,20 @@ public class SQLPreviewAction extends AnAction {
         }
     }
 
-    private void showResult(Project project, String sql, String meta) {
+    private void showResult(Project project, String sql, String meta, SimpleFunction function) {
         if (StrUtil.isBlank(sql)) {
-            NotificationUtils.notifyWarning("未解析到 SQL，请检查预览语句", "SQL Preview", project);
+            notifyError("未解析到 SQL，请检查预览语句（生成代码见 idea.log）", project);
+            function.apply();
             return;
         }
-        ApplicationManager.getApplication().invokeLater(
-                () -> new SQLPreviewDialog(sql, event, meta).setVisible(true),
-                ModalityState.defaultModalityState());
+        ApplicationManager.getApplication().invokeLater(() -> {
+            try {
+                new SQLPreviewDialog(sql, event, meta).setVisible(true);
+            } catch (Throwable e) {
+                LOG.warn("[SQLPreview] show dialog failed", e);
+                notifyError("SQL 预览弹窗失败：" + describeThrowable(e), project);
+            }
+        }, ModalityState.defaultModalityState());
     }
 
     /**
