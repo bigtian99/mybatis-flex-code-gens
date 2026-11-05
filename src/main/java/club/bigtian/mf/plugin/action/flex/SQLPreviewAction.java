@@ -396,6 +396,8 @@ public class SQLPreviewAction extends AnAction {
     private String buildBody(String selectedText, PsiJavaFile psiFile, boolean returnSqlResult) {
         this.returnSqlResult = returnSqlResult;
         this.mutateSource = !returnSqlResult;
+        // 防御：片段若还带着 .update()/.remove()，先截断，否则 toSQL() 会挂在 int 上
+        selectedText = stripTerminalCall(selectedText);
         if (selectedText.startsWith("QueryWrapper")) {
             return StrUtil.format(statementTemplate(), selectedText);
         }
@@ -548,6 +550,24 @@ public class SQLPreviewAction extends AnAction {
             } else {
                 val = null;
             }
+            // UpdateChain.of(getMapper()) / QueryChain.of(mapperField) 这类参数不是类名。
+            // 直接当类名用会把 "getMapper(" 塞进 addMapper(...) 生成非法代码（line 43 语法错误）。
+            // 这里从 ServiceImpl<Mapper, Entity> 泛型推出 Mapper，改成 Mappers.ofMapperClass(X.class)。
+            String candidate = StrUtil.isNotBlank(val) ? val : ofValue;
+            if (StrUtil.isNotBlank(candidate) && StrUtil.isBlank(qualifiedNameImportMap.get(candidate))) {
+                String mapper = serviceImplMapper(psiJavaFile);
+                if (StrUtil.isNotBlank(mapper)) {
+                    String mapperFqn = qualifiedNameImportMap.get(mapper);
+                    if (StrUtil.isBlank(mapperFqn)) {
+                        String pkg = psiJavaFile.getPackageName();
+                        mapperFqn = StrUtil.isBlank(pkg) ? mapper : pkg + "." + mapper;
+                    }
+                    print = print.replaceAll("of\\(\\s*[^()]*(\\(\\))?\\s*\\)",
+                            "of(Mappers.ofMapperClass(" + mapper + ".class))");
+                    val = mapper;
+                    ofValue = mapper + ":" + mapperFqn;
+                }
+            }
             text = "";
         }
         Collection<PsiClass> implementors =
@@ -603,6 +623,33 @@ public class SQLPreviewAction extends AnAction {
                 "Object"), Template.getConfigData(MybatisFlexConstant.SQL_DIALECT,"mysql")) + text + print;
 
         return text;
+    }
+
+    /**
+     * 去掉链式调用末尾的执行方法（.update()/.remove()），保留到最后一个 SQL 构建方法
+     */
+    private static String stripTerminalCall(String text) {
+        if (StrUtil.isBlank(text)) {
+            return text;
+        }
+        if (StrUtil.containsAny(text, ".update()", ".remove()")) {
+            return StrUtil.subBefore(text, ".", true);
+        }
+        return text;
+    }
+
+    /**
+     * 从当前文件的 ServiceImpl&lt;Mapper, Entity&gt; 泛型里取 Mapper 简单类名
+     */
+    private static String serviceImplMapper(PsiJavaFile psiJavaFile) {
+        try {
+            String mapper = StrUtil.subBetween(psiJavaFile.getText(), "ServiceImpl<", ",");
+            if (StrUtil.isNotBlank(mapper)) {
+                return mapper.trim();
+            }
+        } catch (Throwable ignored) {
+        }
+        return null;
     }
 
     private String getOfValue(String text, Map<String, String> qualifiedNameImportMap, PsiJavaFile psiJavaFile) {
