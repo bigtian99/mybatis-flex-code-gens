@@ -310,8 +310,25 @@ public final class SqlPreviewCompiler {
             return classes;
         }
 
+        /**
+         * 编译产物里主类的真实名字。源码的 package 与调用方传入的不一致时，按简单类名兜底匹配，
+         * 因为 defineClass 必须用 class 文件里的真实名字，否则会报 wrong name。
+         */
+        public String resolveMainClassName() {
+            if (classes.containsKey(mainClassName)) {
+                return mainClassName;
+            }
+            String simpleName = mainClassName.substring(mainClassName.lastIndexOf('.') + 1);
+            for (String name : classes.keySet()) {
+                if (name.equals(simpleName) || name.endsWith("." + simpleName)) {
+                    return name;
+                }
+            }
+            return mainClassName;
+        }
+
         public byte[] getMainBytes() {
-            return classes.get(mainClassName);
+            return classes.get(resolveMainClassName());
         }
     }
 

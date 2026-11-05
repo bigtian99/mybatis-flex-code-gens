@@ -70,7 +70,7 @@ public final class SqlPreviewRunner {
         frameworkLoader.patchEntityIfNeeded(entityClass);
         SqlPreviewGeneratedLoader generatedLoader = new SqlPreviewGeneratedLoader(frameworkLoader);
         try {
-            Class<?> previewClass = generatedLoader.define(className, mainBytes);
+            Class<?> previewClass = generatedLoader.define(compiled.resolveMainClassName(), mainBytes);
             Method method = previewClass.getMethod("preview");
             Object result = method.invoke(null);
             String sql = result == null ? null : String.valueOf(result);
