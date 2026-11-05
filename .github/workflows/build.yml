@@ -9,6 +9,11 @@ on:
       - "v*"
   pull_request:
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "发布用的 tag（留空则只构建，不建 Release）"
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -22,7 +27,6 @@ jobs:
     runs-on: ubuntu-latest
     env:
       # IntelliJ Platform Gradle Plugin 把解压后的平台放在项目下 .intellijPlatform
-      # （见插件源码 Constants.CACHE_DIRECTORY = ".intellijPlatform"）
       PLATFORM_CACHE_DIR: .intellijPlatform
     steps:
       - uses: actions/checkout@v4
@@ -33,17 +37,16 @@ jobs:
           distribution: temurin
           java-version: "21"
 
-      # 缓存 1：~/.gradle/caches（含 IntelliJ Platform 安装包 zip，1GB+）
-      # 显式指定 gradle-version：仓库的 gradle-wrapper.properties 指向腾讯云镜像
-      # （distributionUrl=https://mirrors.cloud.tencent.com/gradle/...），
-      # GitHub runner 上拉这个包会 read timeout，直接把整条流水线干掉。
-      # 本地开发依旧用 ./gradlew + 镜像，CI 里用 setup-gradle 装官方发行版。
+      # 缓存 1：~/.gradle/caches（含 IntelliJ Platform 安装包 ideaIU-*.zip，1GB+）
+      # 重要：GitHub Actions 的缓存按 ref 隔离，只能恢复「同一个分支」或「默认分支」保存的缓存。
+      # 所以请始终在固定分支（如 preview/pkg）上 workflow_dispatch 构建，不要每次新建 tag，
+      # 否则每次都是 cache miss，都要重新下平台包。
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.10.2"
+          cache-read-only: false
 
-      # 缓存 key 必须在 checkout 之后算：job 级 env 里的 hashFiles() 会在 checkout 前求值，永远为空
       - name: Compute platform cache key
         id: platform-key
         run: |
@@ -52,8 +55,6 @@ jobs:
           echo "key=idea-${RUNNER_OS}-${digest}" >> "$GITHUB_OUTPUT"
           echo "platform cache key: idea-${RUNNER_OS}-${digest}"
 
-      # 缓存 2：解压后的平台 + 本地 Ivy 仓库，省掉每次重新解压（1~2 分钟）
-      # 用 restore/save 拆开，保证只有构建成功才回写
       - name: Restore IntelliJ Platform
         id: platform-cache
         uses: actions/cache/restore@v4
@@ -88,14 +89,16 @@ jobs:
           path: build/distributions/*.zip
           if-no-files-found: error
 
-      # 打 tag 时顺手把 zip 挂到 GitHub Release，产物不会像 artifact 那样 30 天过期
+      # 打 tag 或手动指定 release_tag 时，把 zip 挂到 GitHub Release
       - name: Attach zip to release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != ''
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          tag="${{ inputs.release_tag }}"
+          if [ -z "$tag" ]; then tag="$GITHUB_REF_NAME"; fi
           ls -lh build/distributions
-          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 \
-            && gh release upload "$GITHUB_REF_NAME" build/distributions/*.zip --clobber \
-            || gh release create "$GITHUB_REF_NAME" build/distributions/*.zip \
-                 --title "$GITHUB_REF_NAME" --generate-notes
+          gh release view "$tag" >/dev/null 2>&1 \
+            && gh release upload "$tag" build/distributions/*.zip --clobber \
+            || gh release create "$tag" build/distributions/*.zip \
+                 --title "$tag" --generate-notes --target "$GITHUB_SHA"
