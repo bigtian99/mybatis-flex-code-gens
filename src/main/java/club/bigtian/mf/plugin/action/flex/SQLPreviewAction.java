@@ -398,6 +398,8 @@ public class SQLPreviewAction extends AnAction {
         this.mutateSource = !returnSqlResult;
         // 防御：片段若还带着 .update()/.remove()，先截断，否则 toSQL() 会挂在 int 上
         selectedText = stripTerminalCall(selectedText);
+        // 支持 return getOne(QueryWrapper.create()...) / getList(QueryWrapper...) 这种"外面包了一层"的写法
+        selectedText = unwrapWrappedChain(selectedText);
         if (selectedText.startsWith("QueryWrapper")) {
             return StrUtil.format(statementTemplate(), selectedText);
         }
@@ -622,6 +624,35 @@ public class SQLPreviewAction extends AnAction {
         text = StrUtil.format(COMMON_CODE, ObjectUtil.defaultIfNull(val,
                 "Object"), Template.getConfigData(MybatisFlexConstant.SQL_DIALECT,"mysql")) + text + print;
 
+        return text;
+    }
+
+    /**
+     * 剥掉包在外面的调用，例如 {@code return getOne(QueryWrapper.create()...)} 取出里面的 QueryWrapper 链。
+     * 否则生成代码会把 "return getOne(" 一起塞进 String.valueOf(...) 里，直接语法错误。
+     */
+    private static String unwrapWrappedChain(String text) {
+        if (StrUtil.isBlank(text)) {
+            return text;
+        }
+        if (text.startsWith("return ")) {
+            text = text.substring("return ".length()).trim();
+        }
+        if (text.startsWith("QueryWrapper")) {
+            return text;
+        }
+        if (!StrUtil.contains(text, "QueryWrapper")) {
+            return text;
+        }
+        int open = text.indexOf('(');
+        int close = text.lastIndexOf(')');
+        if (open < 0 || close <= open) {
+            return text;
+        }
+        String inner = text.substring(open + 1, close).trim();
+        if (inner.startsWith("QueryWrapper")) {
+            return inner;
+        }
         return text;
     }
 
