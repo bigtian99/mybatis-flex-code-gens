@@ -92,6 +92,9 @@ public class PsiJavaFileUtil {
     }
 
     public static PsiClass getPsiClass(String qualifiedName, GlobalSearchScope scope) {
+        if (qualifiedName == null || qualifiedName.trim().isEmpty()) {
+            return null;
+        }
         PsiClass psiClass = ApplicationManager.getApplication().runReadAction((Computable<PsiClass>) () -> {
             Project project = ProjectUtils.getCurrentProject();
             JavaPsiFacade psiFacade = JavaPsiFacade.getInstance(project);

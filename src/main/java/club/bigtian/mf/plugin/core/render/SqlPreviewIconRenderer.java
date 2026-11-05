@@ -2,6 +2,7 @@ package club.bigtian.mf.plugin.core.render;
 
 import club.bigtian.mf.plugin.action.flex.SQLPreviewAction;
 import club.bigtian.mf.plugin.core.icons.Icons;
+import club.bigtian.mf.plugin.core.util.NotificationUtils;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.editor.markup.GutterIconRenderer;
@@ -15,8 +16,6 @@ import java.util.Map;
 public class SqlPreviewIconRenderer extends GutterIconRenderer {
     private int lineNumber;
     private PsiJavaFile psiFile;
-    // 添加一个标志用于控制按钮的启用状态，防止用户多次点击
-    private static boolean isEnabled = true;
     Map<Integer, String> iconMap;
 
     public SqlPreviewIconRenderer(int lineNumber, PsiJavaFile psiFile, Map<Integer, String> iconMap) {
@@ -35,15 +34,18 @@ public class SqlPreviewIconRenderer extends GutterIconRenderer {
         return new AnAction() {
             @Override
             public void actionPerformed(@NotNull AnActionEvent e) {
-                if (isEnabled) {
-                    // 检查按钮是否启用
-                    isEnabled = false; // 点击后禁用按钮
-                    String selectedText = iconMap.get(lineNumber);
+                // 弹窗是模态的，重复点击天然被挡住，不需要"去重标志"。
+                // 之前那个标志一旦没复位就会让后续点击全部静默失效，这里彻底去掉。
+                String selectedText = iconMap.get(lineNumber);
+                try {
                     new SQLPreviewAction().preview(selectedText, psiFile, e, () -> {
-                        // 在SQLPreviewAction完成所有逻辑后，再启用按钮
-                        isEnabled = true;
                     });
-
+                } catch (Throwable t) {
+                    try {
+                        NotificationUtils.notifyError("SQL 预览启动失败：" + t, "SQL Preview",
+                                psiFile.getProject());
+                    } catch (Throwable ignored) {
+                    }
                 }
             }
         };

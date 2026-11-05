@@ -231,7 +231,9 @@ public class MybatisFlexConfigAnnotator implements Annotator {
     private static String handlerVariable(String text) {
         Map<String, String> variableMap = computeVariableValues(element);
         for (Map.Entry<String, String> entry : variableMap.entrySet()) {
-            text = text.replace(entry.getKey(), entry.getValue());
+            // 必须按"完整标识符"替换：直接用 String.replace 会把 taskNo 里的 task 也换掉，
+            // 生成本该是 .eq(taskNo) 的地方变成 .eq(getOne(QueryWrapper.create()...)No)
+            text = replaceIdentifier(text, entry.getKey(), entry.getValue());
         }
 
         for (String key : allMethodList) {
@@ -275,6 +277,21 @@ public class MybatisFlexConfigAnnotator implements Annotator {
         }
 
         return commonReplace(text);
+    }
+
+    /**
+     * 按完整标识符替换，避免 task 命中 taskNo 这种子串误替换
+     */
+    private static String replaceIdentifier(String text, String name, String value) {
+        if (StrUtil.isBlank(text) || StrUtil.isBlank(name) || value == null) {
+            return text;
+        }
+        try {
+            return text.replaceAll("(?<![A-Za-z0-9_$])" + java.util.regex.Pattern.quote(name) + "(?![A-Za-z0-9_$])",
+                    java.util.regex.Matcher.quoteReplacement(value));
+        } catch (Throwable e) {
+            return text.replace(name, value);
+        }
     }
 
     private static Map<String, String> computeVariableValues(PsiElement element) {
